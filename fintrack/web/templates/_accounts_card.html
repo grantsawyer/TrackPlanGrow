@@ -1,0 +1,62 @@
+{# Accounts card (the Overview). Needs `account_groups` (web/dashboard.account_groups). Balances has its own Summary
+   card (_balances_summary.html). #}
+{# ---- Accounts: Assets / Liabilities -> account types (expand) -> accounts, in ONE table so
+     every value shares the same right edge (decimals line up). ---- #}
+{# 1-day change before each value (user's request 2026-10-23; networth.day_changes): ▲ when the balance rose; green when
+   that's good for net worth (a liability rising is red). Blank when unchanged or unknown. #}
+{# An amount: with cents, and in whole dollars on a phone, where each row is one line (.w-long / .w-short; user's
+   choice 2026-11-11) #}
+{% macro amount(cents) -%}
+<span class="w-long">{{ cents | money }}</span><span class="w-short">{{ cents | money_whole }}</span>
+{%- endmacro %}
+{% macro day_change(cents, liability=false) -%}
+<td class="num day-change">{% if cents %}<span class="{{ 'delta-up' if (cents > 0) != liability else 'delta-down' }}">{{ '▲' if cents > 0 else '▼' }} {{ amount(cents | abs) }}</span>{% endif %}</td>
+{%- endmacro %}
+<section class="card">
+  <div class="card-head">
+    <h2>Accounts</h2>{# no Manage link or Net worth row (user's request 2026-11-04) #}
+  </div>
+  <div class="table-wrap">
+    <table class="data compact accounts-tree">
+      <tbody>
+      {% for side in account_groups %}
+        {% set liability = side.classification == 'liability' %}
+        {% set bar = account_bars[side.classification] if account_bars is defined else [] %}
+        <tr class="side-row"><th>{{ side.label }}</th>{{ day_change(side.change_cents, liability) }}<th class="num">{{ amount(side.total_cents) }}</th></tr>
+        {# its proportion bar, one segment per type, as on the Accounts page's Summary card (user's request 2026-10-23) #}
+        {% if bar %}
+        <tr class="prop-row"><td colspan="3">
+          <span class="prop-bar" role="img" aria-label="{{ side.label }} by type: {% for s in bar %}{{ s.label }} {{ '%.0f' | format(s.share * 100) }}%{{ ', ' if not loop.last }}{% endfor %}">
+            {%- for s in bar %}<span class="meter-fill prop-seg hue-{{ s.kind }} shade-{{ s.shade }}" data-share="{{ '%.4f' | format(s.share) }}" title="{{ s.label }} {{ '%.0f' | format(s.share * 100) }}%"></span>{% endfor -%}
+          </span>
+        </td></tr>
+        {% endif %}
+        {% for g in side.groups %}
+          {% set key = side.classification ~ '-' ~ loop.index %}
+          <tr class="type-row">
+            <td>
+              {% if bar %}<span class="prop-swatch hue-{{ bar[loop.index0].kind }} shade-{{ bar[loop.index0].shade }}" aria-hidden="true"></span>{% endif %}
+              <button type="button" class="link-button expander" data-toggle-group="{{ key }}" aria-expanded="false">{{ g.label }}</button>
+              <span class="muted small" title="{{ g.rows | length }} account{{ '' if g.rows | length == 1 else 's' }}">{{ g.rows | length }}</span>
+              {% if g.rows | selectattr('needs_reconnect') | list %}<span class="tag bad">needs reconnect</span>{% endif %}
+            </td>
+            {{ day_change(g.change_cents, liability) }}
+            <td class="num">{{ amount(g.total_cents) }}</td>
+          </tr>
+          {% for r in g.rows %}
+            {% set acct = r.acct %}
+            <tr class="more account-row" data-group="{{ key }}">
+              <td>
+                <a href="/accounts/{{ acct.id }}">{{ acct.name }}</a>
+                {% if r.needs_reconnect %}<span class="tag bad">needs reconnect</span>{% endif %}
+              </td>
+              {{ day_change(r.change_cents, liability) }}
+              <td class="num">{{ amount(acct.current_balance_cents) }}</td>
+            </tr>
+          {% endfor %}
+        {% endfor %}
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>

@@ -1,0 +1,287 @@
+{# Budgets: summary card + Income / Fixed / Flexible table. Rendered inside budgets.html and
+   returned alone by every edit (web/budgets.py), which HTMX swaps into #budget.
+   Line panels, suggestion buttons, and section collapsing are in static/ui.js. #}
+
+{# A progress bar in its own row under a line or section, the full width of the table (user's
+   request: no text beside it; green below 100%, red over). The status is in the bar's tooltip and
+   accessible name, and Remaining shows the amount over. `item` is a line or a section. #}
+{% macro bar_row(item, classes='') -%}
+  {% if item.status != 'none' %}
+    {% set pct = '%.0f' | format((item.used or 0) * 100) %}
+    {% set text = pct ~ '% received' if item.status == 'income' else ('Over budget' if item.status == 'over' else pct ~ '% used') %}
+    <tr class="bar-row {{ classes }}"><td colspan="7">
+      <span class="meter full" role="img" aria-label="{{ text }}" title="{{ text }}"><span class="meter-fill fill-{{ 'ok' if item.status == 'income' else item.status }}"
+        data-share="{{ '%.4f' | format([item.used or (1 if item.status == 'over' else 0), 1] | min) }}"></span></span>
+    </td></tr>
+  {%- endif %}
+{%- endmacro %}
+
+{# Upcoming cell: confirmed recurring items due this month, not posted yet (budgets.upcoming_recurring).
+   Hover lists them. #}
+{% macro upcoming(cents, items, tag='td') -%}
+  <{{ tag }} class="num upcoming">{% if cents %}<span title="{{ items | join('; ') }}">{{ cents | money }}</span>{% else %}<span class="muted">—</span>{% endif %}</{{ tag }}>
+{%- endmacro %}
+
+{# % of total income (user's request 2026-10-06): after Budget = share of PLANNED income, after
+   Actual = share of income RECEIVED this month. "—" when that income is zero (or the amount is). #}
+{% macro pct(cents, base, tag='td') -%}
+  <{{ tag }} class="num pct">{% if cents and base and base > 0 %}{{ '%.0f' | format(cents / base * 100) }}%{% else %}<span class="muted">—</span>{% endif %}</{{ tag }}>
+{%- endmacro %}
+{% set PI, AI = view.planned_income_cents, view.actual_income_cents %}
+
+{# hx-* attributes shared by every edit: replace the whole fragment with the server's answer. #}
+{% set swap = 'hx-target="#budget" hx-swap="outerHTML"' %}
+
+<div id="budget">
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+{# Summary beside the table on wide windows, above it on narrow ones (CSS grid areas). #}
+<div class="budget-layout">
+
+{# ---------------- Summary ---------------- #}
+<section class="card budget-summary budget-side">
+  {# The month, on its own row above the figures (user's request). #}
+  <h2 class="summary-month">{{ month | month_label }}</h2>
+  <div class="summary-grid">
+    <div class="left-to-budget">
+      <div class="kpi-label">Left to budget</div>
+      <div class="hero-value {{ 'delta-down' if view.left_to_budget_cents < 0 else '' }}">{{ view.left_to_budget_cents | money_whole }}</div>
+    </div>
+    <div>
+      <div class="kpi-label">Income</div>
+      <div class="tile-value">{{ view.actual_income_cents | money_whole }} <span class="kpi-sub planned"><span class="slash">/</span>{{ view.planned_income_cents | money_whole }}</span></div>
+      {% if view.income_used is not none %}
+        <span class="meter wide"><span class="meter-fill fill-ok" data-share="{{ '%.4f' | format([view.income_used, 1] | min) }}"></span></span>
+      {% else %}<span class="meter wide"></span>{% endif %}   {# no plan yet: an empty bar #}
+    </div>
+    <div>
+      <div class="kpi-label">Expenses</div>
+      <div class="tile-value">{{ view.actual_expense_cents | money_whole }} <span class="kpi-sub planned"><span class="slash">/</span>{{ view.planned_expense_cents | money_whole }}</span></div>
+      {% if view.expense_used is not none %}
+        <span class="meter wide"><span class="meter-fill fill-{{ view.expense_status }}" data-share="{{ '%.4f' | format([view.expense_used, 1] | min) }}"></span></span>
+        {% if view.expense_status == 'over' %}<span class="status status-over">✕ Over by {{ (view.actual_expense_cents - view.planned_expense_cents) | money_whole }}</span>
+        {% else %}<span class="status status-ok">✓ {{ '%.0f' | format(view.expense_used * 100) }}% used</span>{% endif %}
+      {% else %}<span class="meter wide"></span>{% endif %}
+    </div>
+    {# Savings this month: income − expenses so far, against the plan (= left to budget). #}
+    <div>
+      <div class="kpi-label">Savings</div>
+      <div class="tile-value {{ 'delta-down' if view.actual_leftover_cents < 0 else '' }}">{{ view.actual_leftover_cents | money_whole }}
+        <span class="kpi-sub planned"><span class="slash">/</span>{{ view.left_to_budget_cents | money_whole }}</span></div>
+      {# Positive: fills left to right in green, saved ÷ planned (like Expenses). Negative: fills from
+         the right in red, the shortfall ÷ planned. Nothing planned: an empty bar. (User's requests.) #}
+      {% set saved, plan = view.actual_leftover_cents, view.left_to_budget_cents %}
+      {% if plan <= 0 %}
+        <span class="meter wide"></span>   {# nothing planned: an empty bar #}
+      {% elif saved >= 0 %}
+        {% set share = saved / plan %}
+        <span class="meter wide"><span class="meter-fill fill-ok" data-share="{{ '%.4f' | format([share, 1] | min) }}"></span></span>
+        <span class="status status-ok">✓ {{ '%.0f' | format(saved / plan * 100) }}% of plan</span>
+      {% else %}
+        {% set share = -saved / plan %}
+        <span class="meter wide reverse"><span class="meter-fill fill-over" data-share="{{ '%.4f' | format([share, 1] | min) }}"></span></span>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+{# ---------------- The plan ---------------- #}
+<section class="card budget-main" data-keep-scroll>
+  {# Toolbar: add a line; at the right, the settings popup (grouping framework, group lines without a budget). #}
+  <div class="budget-tools">
+    {% include "_budget_add_group.html" %}
+    {% include "_budget_add_line.html" %}
+    {% with group_label = "Group lines without a budget" %}{% include "_budget_settings.html" %}{% endwith %}
+  </div>
+  <div class="table-wrap">
+    <table class="data budget-table">
+      {# Fixed widths (user's request): the four money columns are equal; each "% inc." is narrow and
+         sits right after its Budget / Actual figure. #}
+      <colgroup>
+        <col class="col-cat"><col class="col-money"><col class="col-pct"><col class="col-money"><col class="col-pct">
+        <col class="col-money"><col class="col-money">
+      </colgroup>
+      <thead>
+        <tr><th>Category</th><th class="num">Budget</th><th class="num pct" title="Budget as a share of planned income">% inc.</th><th class="num">Actual</th><th class="num pct" title="Actual as a share of income received this month">% inc.</th><th class="num" title="Confirmed recurring items due this month that haven't posted yet">Upcoming</th><th class="num">Remaining</th></tr>
+      </thead>
+      {% for s in view.sections %}
+      <tbody data-section="{{ s.key }}">
+        <tr class="section-row {{ 'has-bar' if s.status != 'none' else '' }}">
+          {% include "_budget_section_head.html" %}
+          <th class="num">{{ s.budget_cents | money }}</th>
+          {{ pct(s.budget_cents, PI, 'th') }}
+          <th class="num">{{ s.spent_cents | money }}</th>
+          {{ pct(s.spent_cents, AI, 'th') }}
+          {{ upcoming(s.upcoming_cents, [], 'th') }}
+          <th class="num {{ 'delta-down' if s.remaining_cents < 0 and not s.is_income else '' }}">{{ s.remaining_cents | money if s.status != 'none' else '—' }}</th>
+        </tr>
+        {{ bar_row(s, 'section-row section-bar') }}
+
+        {# "Non-budgeted items": stands in for the rows with no budget when "Group" is on (ui.js).
+           It's drawn right above them, so opening it shows them directly underneath. Lines are
+           sorted with the unbudgeted ones last (budgets.month_view). #}
+        {% set loose_lines = s.lines | rejectattr('budget_cents') | list %}
+        {% set loose_out = view.outside_of('income') if s.is_income else [] %}
+        {% set loose_count = (loose_lines | length) + (loose_out | length) + (s.extras | length) %}
+        {% set group = namespace(shown=not loose_count) %}
+        {% set group_row %}
+        <tr class="nobudget-group">
+          <td><button type="button" class="link-button" data-group-open="{{ s.key }}" aria-expanded="false">Non-budgeted items ({{ loose_count }})</button></td>
+          <td class="num">—</td><td class="num pct"></td>
+          {% set loose_sum = (loose_lines | sum(attribute='spent_cents')) + (loose_out | sum(attribute='cents'))
+                             + (s.extras | sum(attribute='cents')) %}
+          <td class="num">{{ loose_sum | money }}</td>
+          {{ pct(loose_sum, AI) }}
+          {{ upcoming((loose_lines | sum(attribute='upcoming_cents')) + (loose_out | sum(attribute='upcoming_cents'))
+                      + (s.extras | sum(attribute='upcoming_cents')), []) }}
+          <td class="num">—</td>
+        </tr>
+        {% endset %}
+
+        {% for l in s.lines %}
+        {% if not l.budget_cents and not group.shown %}{{ group_row }}{% set group.shown = true %}{% endif %}
+        {% set vals = '{"category": "%s", "month": "%s"}' | format(l.category, month) %}
+        {% set nobudget = 'nobudget' if not l.budget_cents else '' %}
+        <tr class="line {{ nobudget }} {{ 'has-bar' if l.status != 'none' else '' }}" data-line="{{ l.category }}">
+          <td><a href="/transactions?month={{ month }}&{{ 'tag=%d' | format(l.tag.tag_id) if l.tag else 'category=' ~ l.category }}">{{ l.label }}</a>
+            {% if l.rollover %}<span class="tag" title="Unspent or overspent amounts carry into next month">rollover</span>{% endif %}</td>
+          <td class="num">
+            {% set shown = l.budget_cents | money if l.budget_cents is not none else '' %}
+            <input id="amount-{{ l.category }}" class="amount" name="amount" placeholder="—" autocomplete="off"
+              title="An amount, or a calculation like =795/12 (+ − * / ( ) and % for percent)"
+              value="{{ shown }}" data-original="{{ shown }}" aria-label="{{ l.label }} budget"
+              {{ 'data-direct-form' if l.tag else 'data-scope-form' }}="amount-save" data-category="{{ l.category }}" data-month="{{ month }}"
+              data-month-label="{{ month | month_label('short') }}">
+          </td>
+          {{ pct(l.budget_cents, PI) }}
+          <td class="num">{{ l.spent_cents | money }}</td>
+          {{ pct(l.spent_cents, AI) }}
+          {{ upcoming(l.upcoming_cents, l.upcoming_items) }}
+          <td class="num {{ 'delta-down' if l.remaining_cents is not none and l.remaining_cents < 0 and not l.is_income else '' }}">
+            {{ l.remaining_cents | money if l.remaining_cents is not none else '—' }}
+            {% if l.carry_in_cents %}<div class="muted small">incl. {{ '+' if l.carry_in_cents > 0 else '−' }}{{ (l.carry_in_cents if l.carry_in_cents > 0 else -l.carry_in_cents) | money }} carried</div>{% endif %}
+          </td>
+        </tr>
+        {{ bar_row(l, 'line-bar ' ~ nobudget) }}
+        <tr class="line-panel {{ nobudget }}" data-panel="{{ l.category }}" hidden>
+          <td colspan="7">
+            {% if l.tag %}
+            {# a tag's line (user's requests 2026-11-02): the amount above is this month's, out of the total on its card #}
+            <div class="panel-row">
+              {% if l.tag.total_cents is none %}<a class="small" href="/tags">No total yet: set one on its Tags card</a>
+              {% else %}<a class="small" href="/tags">{{ l.tag.total_cents | money_whole }} total</a>
+              <span class="small {{ 'delta-down' if l.tag.total_cents < l.tag.allocated_cents else 'muted' }}">{{ l.tag.allocated_cents | money_whole }} allocated · {{ (l.tag.total_cents - l.tag.allocated_cents) | money_whole }} left to allocate</span>{% endif %}
+            </div>
+            {% else %}
+            <div class="panel-row">
+              <span class="muted small">Fill in from your actuals:</span>
+              {% for key, label in suggestion_labels.items() %}
+                {% set cents = l.suggestions.get(key) %}
+                {% if cents is not none %}
+                  <button type="button" class="chip" data-fill="amount-{{ l.category }}" data-value="{{ '%.2f' | format(cents / 100) }}">{{ label }} <strong>{{ cents | money_whole }}</strong></button>
+                {% else %}
+                  <button type="button" class="chip" disabled>{{ label }}: no history</button>
+                {% endif %}
+              {% endfor %}
+              <span class="muted small">or type any amount or a calculation above, like =795/12.</span>
+            </div>
+            {% endif %}
+            {# a tag's category lines move and go with the tag: those buttons are on its own line #}
+            {% if not (l.tag and l.tag.category) %}
+            <div class="panel-row">
+              {% if not l.is_income %}
+                {% if not l.tag %}
+                <label class="inline-check"><input type="checkbox" name="rollover" {% if l.rollover %}checked{% endif %}
+                  {% if l.budget_cents is none %}disabled title="Set a budget amount first"{% endif %}
+                  hx-post="/budgets/rollover" hx-trigger="change" hx-vals='{{ vals }}' {{ swap | safe }}> Roll over leftovers</label>
+                {% endif %}
+                {# the other spending sections of the framework shown (Fixed ↔ Flexible, Needs ↔ Wants, your groups) #}
+                {% for other in sections if other != 'income' and other != s.key %}
+                <button type="button" class="link-button small" hx-post="/budgets/lines/move"
+                  hx-vals='{"category": "{{ l.category }}", "section": "{{ other }}", "month": "{{ month }}"}' {{ swap | safe }}>Move to {{ sections[other][0] }}</button>
+                {% endfor %}
+              {% endif %}
+              <button type="button" class="link-button small" hx-post="/budgets/lines/remove" hx-vals='{{ vals }}'
+                hx-confirm="Take {{ l.label }} off the budget? {{ 'Its spending goes back to its categories. ' if l.tag }}Its amounts are kept if you add it back." {{ swap | safe }}>Remove from budget</button>
+            </div>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+
+        {% if not group.shown %}{{ group_row }}{% set group.shown = true %}{% endif %}
+
+        {# Spending filed under a split category itself (e.g. Rent & utilities): in this section, not budgetable. #}
+        {% for o in s.extras %}
+        <tr class="outside nobudget">
+          <td>{{ o.label }} <span class="muted small">· not in a subcategory</span></td>
+          <td class="num">—</td><td class="num pct"></td>
+          <td class="num">{{ o.cents | money }}</td>{{ pct(o.cents, AI) }}{{ upcoming(o.upcoming_cents, o.upcoming_items) }}<td></td>
+        </tr>
+        {% endfor %}
+
+        {# Income received in categories that aren't income lines. #}
+        {% if s.is_income %}{% for o in view.outside_of('income') %}
+        <tr class="outside nobudget">
+          <td>{{ o.label }} <span class="muted small">· not in budget</span></td>
+          <td class="num"><button type="button" class="link-button small" hx-post="/budgets/lines"
+            hx-vals='{"category": "{{ o.category }}", "section": "income", "month": "{{ month }}"}' {{ swap | safe }}>Add to Income</button></td><td class="num pct"></td>
+          <td class="num">{{ o.cents | money }}</td>{{ pct(o.cents, AI) }}{{ upcoming(o.upcoming_cents, o.upcoming_items) }}<td></td>
+        </tr>
+        {% endfor %}{% endif %}
+
+      </tbody>
+      {% endfor %}
+
+      {# Spending in categories that aren't on the budget, so the totals still add up. #}
+      {% set loose = view.outside_of('expense') %}
+      {% if loose %}
+      <tbody data-section="outside">
+        <tr class="section-row">
+          <th scope="rowgroup"><button type="button" class="section-toggle" data-collapse="outside" aria-expanded="true">Not in budget</button></th>
+          <th></th><th></th>
+          <th class="num">{{ loose | sum(attribute='cents') | money }}</th>
+          {{ pct(loose | sum(attribute='cents'), AI, 'th') }}
+          {{ upcoming(loose | sum(attribute='upcoming_cents'), [], 'th') }}
+          <th class="num"><span class="muted small">no line</span></th>
+        </tr>
+        {% for o in loose %}
+        <tr class="outside">
+          <td>{{ o.label }}</td>
+          <td class="num">
+            {% for key in sections if key != 'income' %}
+            <button type="button" class="link-button small" hx-post="/budgets/lines"
+              hx-vals='{"category": "{{ o.category }}", "section": "{{ key }}", "month": "{{ month }}"}' {{ swap | safe }}>Add to {{ sections[key][0] | replace(' expenses', '') }}</button>
+            {% endfor %}
+          </td><td class="num pct"></td>
+          <td class="num">{{ o.cents | money }}</td>{{ pct(o.cents, AI) }}{{ upcoming(o.upcoming_cents, o.upcoming_items) }}<td></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      {% endif %}
+
+      {# Savings: this month's income − expenses (planned and actual), with its share of income.
+         Nothing is carried over from earlier months (user's choice). #}
+      <tbody data-section="savings">
+        <tr class="section-row">
+          <th scope="rowgroup">Savings</th>
+          <th class="num {{ 'delta-down' if view.left_to_budget_cents < 0 else '' }}">{{ view.left_to_budget_cents | money }}</th>
+          {{ pct(view.left_to_budget_cents, PI, 'th') }}
+          <th class="num {{ 'delta-down' if view.actual_leftover_cents < 0 else '' }}">{{ view.actual_leftover_cents | money }}</th>
+          {{ pct(view.actual_leftover_cents, AI, 'th') }}
+          <th></th><th></th>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="muted small table-note">Click a line for suggestions and options. When you change a budget you choose whether it's for
+    <strong>{{ month | month_label }}</strong> only or every month after; earlier months keep theirs.
+    Left to budget uses budget amounts; carried-over leftovers only change a line's Remaining.</p>
+</section>
+{# Filled and submitted by ui.js once you choose in the dialog (this month only, or every month after). #}
+<form id="amount-save" hx-post="/budgets/amount" {{ swap | safe }} hidden>
+  <input type="hidden" name="category"><input type="hidden" name="month"><input type="hidden" name="amount">
+  <input type="hidden" name="scope">
+</form>
+{% include "_scope_dialog.html" %}
+</div>
+</div>

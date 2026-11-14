@@ -1,0 +1,340 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% from "_tag_calendar.html" import month_grid, day_dialog %}
+{% block title %}Tags · Track Plan Grow{% endblock %}
+{# Tags (Planning, after Budgets since 2026-11-02; user's request 2026-10-28; web/tags.py, tags.summaries): a card per tag, newest first (its End date, else its latest tagged date). Head:
+   the tag (a link to its transactions, all its dates) with how many and their dates; Spent and, if any, Received at the
+   right (the Credit cards cards' measures). Then what was spent by category, largest first, with its share (a bar, one
+   colour: magnitude), then what was received the same way. Transfers count by direction (user's request 2026-10-28:
+   out = spent, in = received). Each category links to exactly those transactions. Loan entries and transactions
+   waiting for review are tagged like anything else but not added up (the "not counted" note).
+   Rename (pencil) and delete (trash can) at the card's foot, like Categories. #}
+{% macro count(n) -%}{{ n }} transaction{{ '' if n == 1 else 's' }}{%- endmacro %}
+{# spent more than its budget: the status mark with its label (status colours always carry an icon and a label) #}
+{% macro over_mark() %}<span class="status status-over" title="Over budget" aria-label="Over budget">✕</span> {% endmacro %}
+{# An amount in the tag tables: with cents, and in whole dollars on a phone, where the table keeps its four columns
+   (.w-long / .w-short; user's request 2026-11-11) #}
+{% macro amount(cents) -%}
+<span class="w-long">{{ cents | money }}</span><span class="w-short">{{ cents | money_whole }}</span>
+{%- endmacro %}
+{% macro breakdown(s, lines, total, side='spent', budget_col=False) %}
+{% for line in lines %}
+<tr>
+  <td><a href="{{ transactions_url(s, category=line.category, exact='1', kind=line.kind) }}">{{ line.label }}</a>
+      <span class="muted small">{{ line.count }}</span></td>
+  {% if budget_col %}<td class="num"></td>{% endif %}
+  <td class="num">{{ amount(line.cents) }}</td>
+  <td class="share-col">
+    {%- if total > 0 and line.cents > 0 %}<span class="meter" title="{{ '%.0f' | format(line.cents / total * 100) }}% of {{ side }}">
+      <span class="meter-fill" data-share="{{ '%.4f' | format([line.cents / total, 1] | min) }}"></span></span>
+      <span class="muted small">{{ '%.0f' | format(line.cents / total * 100) }}%</span>{% endif -%}
+  </td>
+</tr>
+{% endfor %}
+{% endmacro %}
+{# the ribbon's right: the calendar's view (user's request 2026-10-28; keeps the anchor month) and + for a new tag (user's
+   request 2026-10-29; its name box drops down under it, closed by an outside click or Escape: ui.js [data-popover]) #}
+{% block tabbar_controls %}
+<div class="tabbar-controls">
+  {% if summaries %}
+  {# filters the cards by name as you type (ui.js [data-tag-search]; user's request 2026-11-04) #}
+  <input type="search" class="tag-search" data-tag-search placeholder="Search tags" aria-label="Search tags" autocomplete="off">
+  <nav class="seg" aria-label="Calendar view">
+    {#- 1 year isn't offered on phones (app.css; user's request 2026-11-02) -#}
+    {%- for key, (label, _) in views.items() %}<a href="/tags?{{ 'view=' ~ key ~ '&' if key != 'month' }}month={{ month }}" class="view-{{ key }}"
+      {% if key == view %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor -%}
+  </nav>
+  {# phones: the calendar's one setting here, its gear hidden (user's request 2026-11-11); the same saved setting #}
+  <form method="post" action="/tags/settings" class="phone-only cal-days-toggle">
+    <input type="hidden" name="month" value="{{ month }}"><input type="hidden" name="view" value="{{ view }}">
+    <input type="hidden" name="show_days" value="0">
+    <label class="check-row"><input type="checkbox" name="show_days" value="1" data-autosubmit {% if show_days %}checked{% endif %}> Show transaction dates</label>
+  </form>
+  {% endif %}
+  <details class="pop-button new-tag" data-popover>
+    <summary class="button secondary icon-button" aria-label="New tag" title="New tag">{{ icon("plus") }}</summary>
+    <form method="post" action="/tags/new" class="pop-panel inline-form">
+      <input type="hidden" name="month" value="{{ month }}"><input type="hidden" name="view" value="{{ view }}">
+      <input name="name" maxlength="40" required placeholder="Tag name" aria-label="New tag's name">
+      <button type="submit">Add</button>
+    </form>
+  </details>
+</div>
+{% endblock %}
+{# a tag's color: 36 predefined, yours, or automatic; a new one from the color box joins yours for every tag. Each choice
+   saves at once. #}
+{% macro color_picker(tag) %}
+<details class="pop-button color-picker" data-popover>
+  <summary class="tag-color-button" aria-label="Color for {{ tag.name }}" title="Change color"><span class="swatch tag-swatch" aria-hidden="true"></span></summary>
+  <div class="pop-panel color-panel">
+    <form method="post" action="/tags/{{ tag.id }}/color">
+      <input type="hidden" name="month" value="{{ month }}"><input type="hidden" name="view" value="{{ view }}">
+      <div class="color-grid">
+        {% for shade in range(3) %}{% for hue, shades in color_palette %}
+        <button type="submit" name="color" value="{{ shades[shade] }}" class="color-choice" data-tag-color="{{ shades[shade] }}"
+                title="{{ color_shades[shade] }} {{ hue | lower }}" aria-label="{{ color_shades[shade] }} {{ hue | lower }}" aria-pressed="{{ 'true' if tag.color == shades[shade] else 'false' }}"></button>
+        {% endfor %}{% endfor %}
+      </div>
+      {% if custom_colors %}
+      <div class="small muted color-label">Your colors</div>
+      <div class="color-custom">
+        {% for c in custom_colors %}
+        <span class="color-own">
+          <button type="submit" name="color" value="{{ c }}" class="color-choice" data-tag-color="{{ c }}" title="{{ c }}" aria-label="Your color {{ c }}" aria-pressed="{{ 'true' if tag.color == c else 'false' }}"></button>
+          <button type="submit" name="remove" value="{{ c }}" formaction="/tags/colors/remove" class="link-button small" title="Remove {{ c }} from your colors" aria-label="Remove {{ c }} from your colors">×</button>
+        </span>
+        {% endfor %}
+      </div>
+      {% endif %}
+      <button type="submit" name="color" value="" class="secondary color-auto" aria-pressed="{{ 'false' if tag.color else 'true' }}">Automatic</button>
+    </form>
+    <form method="post" action="/tags/{{ tag.id }}/color" class="color-new">
+      <input type="hidden" name="month" value="{{ month }}"><input type="hidden" name="view" value="{{ view }}">
+      <label class="small muted">Custom <input type="color" name="custom" value="{{ tag.color or '#2563eb' }}" aria-label="Choose a custom color"></label>
+      <button type="submit" class="secondary add-button">Add</button>
+    </form>
+  </div>
+</details>
+{% endmacro %}
+{# what the ribbon's search reads (user's requests 2026-11-04): the name, and its Start and End dates as shown ("Sep 12")
+   and as their month and year ("September 2026"), so "sep" finds a tag starting or ending in September #}
+{% macro search_text(tag) -%}
+{{ tag.name | lower }}{% for d in (tag.start_date, tag.end_date) if d %} {{ (d | date_label) | lower }} {{ (d[:7] | month_label) | lower }}{% endfor %}
+{%- endmacro %}
+{# one tag's card #}
+{% macro tag_card(s) %}
+{% set editing = edit_id == s.tag.id %}
+{% set here = '/tags?' ~ ('view=' ~ view ~ '&' if view != 'month' else '') ~ 'month=' ~ month %}
+{% set keep %}<input type="hidden" name="month" value="{{ month }}"><input type="hidden" name="view" value="{{ view }}">{% if editing %}<input type="hidden" name="edit" value="{{ s.tag.id }}">{% endif %}{% endset %}
+<section id="tag-card-{{ s.tag.id }}" class="card tag-card {{ slots[s.tag.id] }}{{ ' on-calendar' if s.tag.id in on_calendar }}{{ ' editing' if editing }}"{% if s.tag.color %} data-tag-color="{{ s.tag.color }}"{% endif %} data-keep-scroll data-tag-text="{{ search_text(s.tag) }}">
+  <div class="card-head card-measures">
+    <div class="measure-col">
+      {# the tag's colour (its calendar bars and legend), before its name (user's request 2026-10-28) #}
+      {# ...which it opens a picker for (user's request 2026-11-02; ui.js paints data-tag-color, the CSP allows no inline styles) #}
+      {# a tag still to come counts down to its Start date (user's request 2026-11-04) #}
+      {% set until = countdown(s.tag.start_date) %}
+      {# edit mode (its pencil, ?edit=<id>; user's request 2026-11-04): the name is a box, saved on leaving it #}
+      <h2{% if editing %} class="tag-title-edit"{% endif %}>{{ color_picker(s.tag) }}
+        {%- if editing %}<input class="tag-name-input" name="name" form="rename-{{ s.tag.id }}" value="{{ s.tag.name }}" maxlength="40" required
+                                data-submit-on-leave aria-label="Name of {{ s.tag.name }}">
+        {%- else %}{% if s.count %}<a href="{{ transactions_url(s) }}">{{ s.tag.name }}</a>{% else %}{{ s.tag.name }}{% endif %}
+        {%- if until %} <span class="tag-countdown">({{ until }})</span>{% endif %}
+        {#- the pencil after the name and countdown opens edit mode (user's request 2026-11-04) #}
+        <a class="icon-edit tag-edit" data-keep-place href="{{ here }}&amp;edit={{ s.tag.id }}" title="Edit {{ s.tag.name }}" aria-label="Edit {{ s.tag.name }}">{{ icon("pencil") }}</a>
+        {%- endif %}</h2>
+      {% if not editing %}
+      {# its own range, right under the name (user's requests 2026-11-04: the range of their dates went; the counts are on
+         the table's rows) #}
+      {% set range %}{% if s.tag.start_date and s.tag.end_date %}{{ s.tag.start_date | date_label }}{% if s.tag.end_date != s.tag.start_date %} – {{ s.tag.end_date | date_label }}{% endif %}{% elif s.tag.start_date %}From {{ s.tag.start_date | date_label }}{% elif s.tag.end_date %}Until {{ s.tag.end_date | date_label }}{% endif %}{% endset %}
+      {% if range %}<p class="tag-when">{{ range }}</p>{% endif %}
+      {% endif %}
+    </div>
+    <div class="measure-col end">
+      <div class="measure">
+        <span class="measure-value">{{ s.spent_cents | money_whole }}</span>
+        <span class="kpi-label">Spent</span>
+      </div>
+      {% if s.received_cents %}
+      <div class="measure">
+        <span class="measure-value">{{ s.received_cents | money_whole }}</span>
+        <span class="kpi-label">Received</span>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {# its own dates (user's request 2026-10-28): the calendar's range once both are set. Read in view mode ("Oct 17 – Nov 1"),
+     boxes in edit mode, saved on leaving them (user's request 2026-11-04) #}
+  {% if editing %}
+  <form method="post" action="/tags/{{ s.tag.id }}/dates" class="tag-dates small">
+    {{ keep }}
+    {# its own row, the card's full width: Start in the left half, End from the middle; each label under its box (user's requests 2026-10-28) #}
+    <label class="date-field"><input type="date" name="start" value="{{ s.tag.start_date or '' }}" data-submit-on-leave aria-label="{{ s.tag.name }} start date"><span>Start</span></label>
+    <label class="date-field"><input type="date" name="end" value="{{ s.tag.end_date or '' }}" data-submit-on-leave aria-label="{{ s.tag.name }} end date"><span>End</span></label>
+    <noscript><button type="submit" class="secondary">Save</button></noscript>
+  </form>
+  {% endif %}
+  {# a category budget that would take the categories past the total: raise the total, or not (user's request 2026-11-04) #}
+  {% if raise_prompt and raise_prompt.tag_id == s.tag.id %}
+  <form method="post" action="/tags/{{ s.tag.id }}/category-budget" class="tag-raise" role="alert">
+    {{ keep }}
+    <input type="hidden" name="category" value="{{ raise_prompt.category }}"><input type="hidden" name="amount" value="{{ raise_prompt.amount }}">
+    <input type="hidden" name="raise" value="1">
+    <p class="small">With {{ raise_prompt.label }} at {{ raise_prompt.amount }}, the category budgets add up to {{ raise_prompt.needed | money }},
+      more than the {{ raise_prompt.total | money }} budget. Raise the budget to {{ raise_prompt.needed | money }}?</p>
+    <button type="submit">Raise budget and save</button>
+    <a class="muted" data-keep-place href="/tags?{{ 'view=' ~ view ~ '&' if view != 'month' }}month={{ month }}{{ '&edit=' ~ s.tag.id if editing }}">Cancel</a>
+  </form>
+  {% endif %}
+  {# The budget is in the table (user's request 2026-11-04): each category budget beside what it spent, then Other (the rest
+     of the total) with each category used, then the Total. In edit mode the budgets are boxes, saved on leaving them (each
+     its own form below, by `form=`, as a form can't wrap a row): blank, or its trash can, removes a category budget, and
+     a last row adds one. #}
+  {% set budgeted = editing or s.tag.budget_cents is not none or s.category_budgets %}
+  {% set received = s.lines | selectattr('side', 'equalto', 'received') | list %}
+  {% if s.lines or budgeted %}
+  <div class="table-wrap">
+    <table class="data compact tag-table{{ ' with-budget' if budgeted }}">
+      {% if budgeted %}
+      <thead><tr><th>Category</th><th class="num">Budget</th><th class="num">Amount</th><th class="share-col">Share</th></tr></thead>
+      {# the total: yours, else the category budgets' sum (shown, and the box's placeholder); first (user's request 2026-11-04) #}
+      <tbody><tr class="group tag-total"><th>Total{% if s.spent_count %} <span class="muted small">{{ s.spent_count }}</span>{% endif %}</th>
+        <th class="num">
+          {%- if editing %}<input class="cell-input" name="amount" form="total-{{ s.tag.id }}" autocomplete="off" inputmode="decimal" data-submit-on-leave
+                 aria-label="{{ s.tag.name }} total budget" value="{{ s.tag.budget_cents | money if s.tag.budget_cents is not none else '' }}"
+                 placeholder="{{ s.budget_total_cents | money_whole if s.budget_total_cents is not none else '—' }}">
+          {%- elif s.budget_total_cents is not none %}{{ over_mark() if s.budget and s.budget.over }}{{ s.budget_total_cents | money_whole }}{% endif %}</th>
+        <th class="num">{{ amount(s.spent_cents) }}</th>
+        <th class="share-col">{% if s.budget and s.budget.used is not none and not editing %}<span class="muted small">{{ '%.0f' | format(s.budget.used * 100) }}% used</span>{% endif %}</th></tr></tbody>
+      {% if s.category_budgets %}
+      <tbody>
+      {% for b in s.category_budgets %}
+      <tr>
+        <td><a href="{{ transactions_url(s, category=b.category, kind='expense') }}">{{ b.label }}</a>
+            {%- if b.count %} <span class="muted small">{{ b.count }}</span>{% endif %}</td>
+        <td class="num">
+          {%- if editing %}<input class="cell-input" name="amount" form="cb-{{ s.tag.id }}-{{ loop.index }}" value="{{ b.budget_cents | money }}"
+                 autocomplete="off" inputmode="decimal" data-submit-on-leave aria-label="{{ s.tag.name }} budget for {{ b.label }}">
+          {%- else %}{{ over_mark() if b.spent_cents > b.budget_cents }}{{ b.budget_cents | money_whole }}{% endif %}</td>
+        <td class="num">{{ amount(b.spent_cents) }}</td>
+        <td class="share-col">
+          {%- if editing %}
+          {# its trash can asks first (user's request 2026-11-02): removing it also removes what was allocated to it on Budgets #}
+          <details class="confirm-delete">
+            <summary class="icon-delete" title="Remove {{ b.label }}" aria-label="Remove the {{ b.label }} budget from {{ s.tag.name }}">{{ icon("trash") }}</summary>
+            <form method="post" action="/tags/{{ s.tag.id }}/category-budget" class="inline-form">
+              {{ keep }}<input type="hidden" name="category" value="{{ b.category }}"><input type="hidden" name="amount" value="">
+              <span class="small">Remove {{ b.label }} from this budget? Amounts allocated to it on Budgets go too.</span>
+              <button type="submit" class="danger">Remove</button>
+            </form>
+          </details>
+          {%- elif s.spent_cents > 0 and b.spent_cents > 0 %}<span class="meter" title="{{ '%.0f' | format(b.spent_cents / s.spent_cents * 100) }}% of spent">
+            <span class="meter-fill" data-share="{{ '%.4f' | format([b.spent_cents / s.spent_cents, 1] | min) }}"></span></span>
+            <span class="muted small">{{ '%.0f' | format(b.spent_cents / s.spent_cents * 100) }}%</span>{% endif -%}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+      {% if s.other_lines or s.other_budget_cents %}
+      <tbody>
+        <tr class="group"><th>Other{% set n = s.other_lines | sum(attribute='count') %}{% if n %} <span class="muted small">{{ n }}</span>{% endif %}</th>
+          <th class="num">{% if s.other_budget_cents is not none %}{{ over_mark() if s.other_spent_cents > s.other_budget_cents }}{{ s.other_budget_cents | money_whole }}{% endif %}</th>
+          <th class="num">{{ amount(s.other_spent_cents) }}</th><th></th></tr>
+        {{ breakdown(s, s.other_lines, s.spent_cents, budget_col=True) }}
+      </tbody>
+      {% endif %}
+      {% else %}
+      <tbody>{{ breakdown(s, s.lines | selectattr('side', 'equalto', 'spent') | list, s.spent_cents, budget_col=True) }}</tbody>
+      {% endif %}
+      {% if editing %}
+      {% set taken = s.category_budgets | map(attribute='category') | list %}
+      <tbody><tr class="tag-add-row">
+        <td><select name="category" form="add-{{ s.tag.id }}" aria-label="Category to budget in {{ s.tag.name }}">
+          <option value="">Add a category budget…</option>
+          {% for c in spending_categories if c.key not in taken %}<option value="{{ c.key }}">{{ c | category_option }}</option>{% endfor %}
+        </select></td>
+        <td class="num"><input class="cell-input" name="amount" form="add-{{ s.tag.id }}" autocomplete="off" inputmode="decimal" placeholder="Amount" aria-label="Amount"></td>
+        <td colspan="2"><button type="submit" form="add-{{ s.tag.id }}" class="secondary">Add</button></td>
+      </tr></tbody>
+      {% endif %}
+      {% if received %}
+      <tbody><tr class="group"><th colspan="4">Received</th></tr>{{ breakdown(s, received, s.received_cents, 'received', budget_col=True) }}</tbody>
+      {% endif %}
+      {% else %}
+      <thead><tr><th>Category</th><th class="num">Amount</th><th class="share-col">Share</th></tr></thead>
+      <tbody>{{ breakdown(s, s.lines | selectattr('side', 'equalto', 'spent') | list, s.spent_cents) }}</tbody>
+      {% if received %}
+      <tbody><tr class="group"><th colspan="3">Received</th></tr>{{ breakdown(s, received, s.received_cents, 'received') }}</tbody>
+      {% endif %}
+      {% endif %}
+    </table>
+  </div>
+  {% endif %}
+  {% if editing %}
+  {# the edit-mode boxes' forms (their inputs point here by form=) #}
+  <form method="post" action="/tags/{{ s.tag.id }}/rename" id="rename-{{ s.tag.id }}" hidden>{{ keep }}</form>
+  <form method="post" action="/tags/{{ s.tag.id }}/budget" id="total-{{ s.tag.id }}" hidden>{{ keep }}</form>
+  {% for b in s.category_budgets %}
+  <form method="post" action="/tags/{{ s.tag.id }}/category-budget" id="cb-{{ s.tag.id }}-{{ loop.index }}" hidden>{{ keep }}<input type="hidden" name="category" value="{{ b.category }}"></form>
+  {% endfor %}
+  <form method="post" action="/tags/{{ s.tag.id }}/category-budget" id="add-{{ s.tag.id }}" hidden>{{ keep }}</form>
+  {% endif %}
+  {% if s.not_counted %}<p class="muted small">{{ count(s.not_counted) }} not counted (loan entries, or waiting for review).</p>{% endif %}
+  {# the pencil opens edit mode; Done closes it; delete only in edit mode (user's request 2026-11-04) #}
+  {% if editing %}
+  <div class="tag-manage">
+    <details class="confirm-delete">
+      <summary class="icon-delete" title="Delete {{ s.tag.name }}" aria-label="Delete {{ s.tag.name }}">{{ icon("trash") }}</summary>
+      <form method="post" action="/tags/{{ s.tag.id }}/delete" class="inline-form">
+        <span class="small">Delete {{ s.tag.name }}? Its {{ count(s.count) }} just lose the tag.</span>
+        <button type="submit" class="danger">Delete</button>
+      </form>
+    </details>
+    <a class="button secondary small" data-keep-place href="{{ here }}">Done</a>
+  </div>
+  {% endif %}
+</section>
+{% endmacro %}
+{% block content %}
+{% if msg %}<p class="flash ok" role="status">{{ msg }}</p>{% endif %}
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+{% if summaries %}
+{# ---- Calendar (user's requests 2026-10-28; web/tags.calendar_month): bars for a tag's own dates (and single days outside
+     them) or its runs of consecutive days, packed into lanes per week, in the tag's own colour; a bar links to its days'
+     transactions and names its dates and spending on hover; one continuing from / into another week has a square end.
+     The ribbon toggle (CALENDAR_VIEWS): 1 month = one grid with named bars; 3 months = three grids, smaller names; 1 year
+     = twelve small grids, bars as thin strips (no names: colour and hover tell them apart; no legend, user's request
+     2026-10-29). Arrows step the view; the gear right of them opens its settings (show the tagged days or only ranges). ---- #}
+<section class="card tag-calendar">
+  <div class="card-head">
+    <h2>{{ calendar_title }}</h2>
+    <div class="cal-tools">
+      <nav class="seg step-nav" aria-label="Move the calendar">
+        {% set unit = {'month': 'month', 'quarter': 'month', 'year': 'year'}[view] %}
+        {% set q = '' if view == 'month' else 'view=' ~ view ~ '&' %}
+        <a href="/tags?{{ q }}month={{ prev_month }}" aria-label="Back a {{ unit }}" title="Back a {{ unit }}">←</a>
+        {% if not at_today %}<a href="/tags?{{ q }}month={{ today_month }}" aria-label="Back to today" title="Back to today">Today</a>{% endif %}
+        <a href="/tags?{{ q }}month={{ next_month }}" aria-label="Ahead a {{ unit }}" title="Ahead a {{ unit }}">→</a>
+      </nav>
+      {# settings (user's request 2026-10-29), saved (app_settings): unticked = only tags' own Start - End ranges #}
+      <details class="pop-button cal-settings" data-popover>
+        <summary class="button secondary icon-button" aria-label="Calendar settings" title="Calendar settings">{{ icon("gear") }}</summary>
+        <form method="post" action="/tags/settings" class="pop-panel settings-pop">
+          <input type="hidden" name="month" value="{{ month }}"><input type="hidden" name="view" value="{{ view }}">
+          <input type="hidden" name="show_days" value="0">
+          <label class="radio-row"><input type="checkbox" name="show_days" value="1" data-autosubmit
+            {% if show_days %}checked{% endif %}> Show transaction dates</label>
+        </form>
+      </details>
+    </div>
+  </div>
+  {# At most 40% of the window's height, scrolling inside if it must (user's requests 2026-11-02; app.css): 3 months in a row
+     (one column on narrow screens), the year as 2 rows of 6 on any screen. #}
+  <div class="cal-views" data-cal-views data-view="{{ view }}">
+    {% if view == 'month' %}
+      {{ month_grid(calendars[0], '') }}
+    {% else %}
+    <div class="cal-multi {{ view }}">
+      {% for c in calendars %}{{ month_grid(c, 'small' if view == 'quarter' else 'tiny') }}{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+{% if summaries %}
+{{ day_dialog(month, view) }}
+{% endif %}
+{% if not summaries %}
+<section class="card"><p class="muted">No tags yet. Add one with +, from a transaction's edit panel on Transactions, or with group edit.</p></section>
+{% else %}
+{# The cards, newest first (user's request 2026-11-02; web/tags.card_order), in their own scrolling area so the calendar stays in
+   view: those on the calendar now are outlined, and ui.js [data-tag-cards] scrolls to the first of them. #}
+<div data-keep-scroll>
+<div class="tag-cards" data-tag-cards>
+  <div class="grid-2">
+  {% for s in cards %}{{ tag_card(s) }}{% endfor %}
+  </div>
+  <p class="muted" data-tag-none hidden>No tags match.</p>
+</div>
+</div>
+{% endif %}
+{% endblock %}

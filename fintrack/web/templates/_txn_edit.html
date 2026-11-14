@@ -1,0 +1,156 @@
+{# Edit panel under a transaction row (milestone 14; opened by clicking the row, ui.js). One Save for its fields, labelled
+   above each (user's request 2026-11-01): description, category, tags, recurring, reward bonus, purpose, transfer; it returns the
+   updated row and the panel closes. Only removing a tag and the transfer buttons act at once. The bank's own text is
+   below them, the panel's full width. "Create a rule…" opens the rule builder, prefilled. Investment activity has just what applies to it. #}
+{#- `panel_view` "review" (the Categories to review card, user's request 2026-11-01): the server answers with a reload, so
+    nothing is swapped, and the row's id may not be on this page -#}
+{% from "_icons.html" import icon %}
+{% set row_target = 'this' if panel_view == 'review' else '#txn-' ~ t.id %}
+{#- a rewards redemption's line (manual_transactions.py; user's request 2026-11-04): no Recurring or Reward bonus; the
+    points it used show on both lines (editable on the credit) and the source line names the other one -#}
+{% set in_pair = pair_other is defined and pair_other %}
+{% macro points(n) %}{{ '%.2f' | format(n / 100) if reward_unit == 'cash' else '{:,}'.format(n) }}{% endmacro %}
+{% set view_vals = ', "view": "' ~ panel_view ~ '"' if panel_view in ('account', 'review') else '' %}
+<tr class="edit-panel" id="edit-panel-{{ t.id }}">
+  {# account_view: the Balances account page's table (5 columns; the row it returns keeps that format) #}
+  <td colspan="{{ (5 if account_view else 7) + (1 if rewards_col is defined and rewards_col else 0) + (1 if card_col is defined and card_col else 0) }}">
+    {#- phones (app.css ≤640px): the panel is a full-screen sheet (user's design 2026-11-05), headed by what the phone's
+        row leaves out: the full description, amount, date, account and category name -#}
+    <div class="sheet-head phone-only">
+      <div class="sheet-title"><strong>{{ t.description }}</strong>
+        <span class="num {{ 'ok' if t.amount_cents < 0 else '' }}">{% if t.amount_cents < 0 %}+{{ (-t.amount_cents) | money }}{% else %}{{ t.amount_cents | money }}{% endif %}</span></div>
+      <dl class="sheet-facts">
+        <div><dt>Date</dt><dd>{{ t.date | date_label }}{% if t.pending %} · pending{% endif %}</dd></div>
+        <div><dt>Account</dt><dd>{{ t.account_name }}{% if t.account_mask %} ····{{ t.account_mask }}{% endif %}</dd></div>
+        <div><dt>Category</dt><dd>{{ t.category_label }}</dd></div>
+      </dl>
+      <button type="button" class="link-button sheet-close" data-dismiss-row aria-label="Close"><span aria-hidden="true">✕</span></button>
+    </div>
+    <form class="txn-edit" hx-post="/transactions/{{ t.id }}/edit" hx-target="{{ row_target }}" hx-swap="outerHTML" data-close-panel>
+      {% if view_vals %}<input type="hidden" name="view" value="{{ panel_view }}">{% endif %}
+      <div class="edit-fields">
+        {# Prefilled with the current description, to edit or delete (user's request); saving the bank's
+           own wording keeps it automatic, blank goes back to it. #}
+        <label class="edit-field"><span>Description</span>
+          <input name="description" value="{{ t.description }}" maxlength="120" placeholder="{{ t.merchant_name or t.name }}"></label>
+        <label class="edit-field"><span>Category</span>
+          <select name="category">
+            <option value="" {% if t.category_source != 'you' %}selected{% endif %}>
+              {%- if t.category_source == 'you' %}Automatic{% else %}{{ t.category_label }} (automatic){% endif -%}
+            </option>
+            {% for heading, group in categories | by_kind %}<optgroup label="{{ heading }}">{% for c in group %}
+              <option value="{{ c.key }}" {% if t.category_source == 'you' and t.category == c.key %}selected{% endif %}>{{ c | category_option }}</option>{% endfor %}</optgroup>{% endfor %}
+          </select></label>
+        <div class="edit-field"><span>Tags</span>{% include "_txn_tag_line.html" %}</div>
+        {% if not activity %}
+        {% if not in_pair %}
+        {# Recurring (user's requests 2026-10-16, 2026-11-01): the first entry changes nothing; save_edit applies the rest #}
+        <label class="edit-field"><span>Recurring</span>
+          <select name="recurring">
+            <option value="" selected>
+              {%- if recurring_item %}{{ recurring_item.name }} ({{ frequency_label(recurring_item.frequency) | lower }})
+              {%- elif recurring_excluded %}Not recurring{% else %}None{% endif -%}
+            </option>
+            {% if recurring_item %}<option value="exclude">Not recurring</option>
+            {% else %}
+            {% if recurring_excluded %}<option value="undo">Automatic</option>{% endif %}
+            {% if recurring_choices %}<optgroup label="Add to">
+              {% for i in recurring_choices %}<option value="item:{{ i.id }}">{{ i.name }} · {{ i.amount_cents | abs | money }} {{ frequency_label(i.frequency) | lower }}</option>{% endfor %}
+            </optgroup>{% endif %}
+            <optgroup label="New recurring item">
+              {% for key, label in recurring_frequencies.items() %}<option value="new:{{ key }}">{{ label }}</option>{% endfor %}
+            </optgroup>
+            {% if not recurring_excluded %}<option value="exclude">Not recurring</option>{% endif %}
+            {% endif %}
+          </select></label>
+        {% endif %}
+        {# Reward bonus (rewards.py, user's request 2026-10-26): a one-off on this transaction, in the card's unit; blank = none.
+           One it can't read comes back in #bonus-msg-N and nothing is saved. #}
+        {% if reward_unit and in_pair and t.amount_cents > 0 %}
+        <div class="edit-field"><span>Rewards used</span><span class="edit-static">{{ points(pair_used) if pair_used else '—' }} {{ 'cash back' if reward_unit == 'cash' else reward_unit }}</span></div>
+        {% endif %}
+        {% if reward_unit %}
+        {% if not in_pair %}
+        <input type="hidden" name="bonus_shown" value="1">
+        <label class="edit-field"><span>Reward bonus ({{ '$ cash back' if reward_unit == 'cash' else reward_unit }})</span>
+          <input name="bonus" inputmode="decimal" value="
+            {%- if reward_bonus %}{{ '%.2f' | format(reward_bonus / 100) if reward_unit == 'cash' else '{:,}'.format(reward_bonus) }}{% endif %}"
+            placeholder="{{ '25.00' if reward_unit == 'cash' else '5,000' }}">
+          <span id="bonus-msg-{{ t.id }}" class="flash-inline bad" role="status"></span></label>
+        {% endif %}
+        {# Also paid with rewards (user's request 2026-11-04): a bank charge that was more, the rest paid with the card's
+           rewards (a $50 charge for a $200 ticket, $150 in points): a rewards pair of that value follows the charge's
+           category and tags (manual_transactions.set_part). Both blank = none. #}
+        {% if t.amount_cents > 0 and not (is_manual is defined and is_manual) %}
+        <input type="hidden" name="part_shown" value="1">
+        <label class="edit-field"><span>Also paid with rewards ($)</span>
+          <input name="part_value" inputmode="decimal" value="{{ '%.2f' | format(rewards_part[0] / 100) if rewards_part }}" placeholder="150.00"></label>
+        <label class="edit-field"><span>Rewards used ({{ '$ cash back' if reward_unit == 'cash' else reward_unit }})</span>
+          <input name="part_rewards" inputmode="decimal" value="
+            {%- if rewards_part %}{{ '%.2f' | format(rewards_part[1] / 100) if reward_unit == 'cash' else '{:,}'.format(rewards_part[1]) }}{% endif %}"
+            placeholder="{{ '150.00' if reward_unit == 'cash' else '10,000' }}">
+          <span id="part-msg-{{ t.id }}" class="flash-inline bad" role="status"></span></label>
+        {% endif %}
+        {# Rewards used (user's request 2026-11-04): money in that the card's rewards paid (a statement credit, or the rebate
+           of a purchase you added as paid with rewards); blank = none. It earns and takes back no rewards. #}
+        {% if t.amount_cents < 0 %}
+        <input type="hidden" name="rewards_used_shown" value="1">
+        <label class="edit-field"><span>Rewards used ({{ '$ cash back' if reward_unit == 'cash' else reward_unit }})</span>
+          <input name="rewards_used" inputmode="decimal" value="
+            {%- if rewards_used %}{{ '%.2f' | format(rewards_used / 100) if reward_unit == 'cash' else '{:,}'.format(rewards_used) }}{% endif %}"
+            placeholder="{{ '25.00' if reward_unit == 'cash' else '25,000' }}">
+          <span id="used-msg-{{ t.id }}" class="flash-inline bad" role="status"></span></label>
+        {% endif %}
+        {% endif %}
+        {% endif %}
+        {% if t.kind == 'transfer' and purposes is defined and purposes and t.account_type != 'investment' %}
+        {# Link a transfer to a purpose account, e.g. money lent (purposes.py; user's request 2026-10-12). Last, as only some rows
+           have it: Tags and Recurring stay in the same place on every row (user's request 2026-11-01). #}
+        <label class="edit-field"><span>Purpose</span>
+          <select name="purpose">
+            <option value="">None</option>
+            {% for p in purposes %}<option value="{{ p.id }}" {% if purpose_link == p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+          </select></label>
+        {% endif %}
+        {% if not activity and (t.is_transfer or t.transfer_ignore) %}
+        <div class="edit-field"><span>Transfer</span>
+          <div class="edit-transfer">
+          {% if t.is_transfer %}Matched, not counted
+            <button type="button" class="link-button" hx-post="/transactions/{{ t.id }}/transfer" hx-vals='{"ignore": "1"{{ view_vals }}}'
+                    hx-target="{{ row_target }}" hx-swap="outerHTML" data-close-panel>Not a transfer</button>
+          {% else %}<span class="muted">Marked not a transfer</span>
+            <button type="button" class="link-button" hx-post="/transactions/{{ t.id }}/transfer" hx-vals='{"ignore": "0"{{ view_vals }}}'
+                    hx-target="{{ row_target }}" hx-swap="outerHTML" data-close-panel>Allow transfer matching</button>
+          {% endif %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+      {# the source's own text, for finding rule text; where it happened when Plaid sends it (migration 0049) #}
+      <div class="edit-source small muted">
+        {% if activity %}<p>{{ 'Yours' if activity_deletable is defined and activity_deletable else 'From Plaid' }}: {{ activity.plaid_name }} · {{ activity.type_label }}{% if activity.ticker %} · {{ activity.ticker }}{% endif %}</p>
+        {% elif in_pair %}<p>Rewards redemption · {{ 'credit' if pair_other.amount_cents < 0 else 'cost' }}: {{ pair_other.description }},
+          {{ pair_other.date | date_label }}, {{ (pair_other.amount_cents | abs) | money }}</p>
+        {% elif is_manual is defined and is_manual %}<p>Manual cash transaction</p>
+        {% elif imported is defined and imported %}<p>Imported from a file: {{ t.name }}</p>
+        {% else %}<p>From the bank: {{ t.name }}{% if t.merchant_name and t.merchant_name != t.name %} · merchant {{ t.merchant_name }}{% endif %}
+          {%- if original_description and original_description != t.name %} · raw {{ original_description }}{% endif %}</p>
+        {% if location %}<p class="txn-location">Location: {{ location }}</p>{% endif %}
+        {% endif %}
+      </div>
+      <div class="edit-actions">
+        <button type="submit">Save</button>
+        <button type="button" class="link-button muted" data-dismiss-row>Cancel</button>
+        {# one you added (manual_transactions.py): deleting it takes its rewards pair too, so the page reloads #}
+        {# a trash can, as elsewhere (user's request 2026-11-04) #}
+        {% if activity_deletable is defined and activity_deletable %}<button type="button" class="icon-delete" hx-post="/activity/{{ -t.id }}/delete"
+                title="Delete" aria-label="Delete this activity"
+                hx-confirm="Delete this activity? Its holdings change with it.">{{ icon("trash") }}</button>{% endif %}
+        {% if deletable is defined and deletable %}<button type="button" class="icon-delete" hx-post="/transactions/{{ t.id }}/delete"
+                title="Delete" aria-label="Delete this transaction"
+                hx-confirm="{% if imported %}Delete this imported transaction? Importing the file again brings it back.{% else %}Delete this transaction you added{{ ' and the other half of its rewards pair' if manual_pair }}?{% endif %}">{{ icon("trash") }}</button>{% endif %}
+        {% if not activity %}<a class="button secondary edit-rule" href="/rules/new?from={{ t.id }}{% if rule_return %}&amp;return_url={{ rule_return | urlencode }}{% endif %}">Create a rule…</a>{% endif %}
+      </div>
+    </form>
+  </td>
+</tr>

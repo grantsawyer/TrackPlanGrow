@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Rules · Track Plan Grow{% endblock %}
+{# Rules (user's requests 2026-11-02; fintrack/rules.py), in two sections. Category keywords: a rule that only says "text contains
+   any of these -> this category", a row per category, keywords separated by dots. Custom rules: the rest, conditions and actions
+   a line each, in the order they run: drag, or the arrows on a keyboard or phone. They run before keywords. Account rules (money
+   lent, destination rules) are on each account's page. #}
+{% from "_icons.html" import icon %}
+{% from "_rule_parts.html" import delete_menu, filter_data %}
+{% block content %}
+{% if msg %}<p class="flash ok" role="status">{{ msg }}</p>{% endif %}
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+{% if rules %}
+{# Filters (user's request 2026-11-02): both sections, in the browser, ui.js; kept for this tab while you move or edit rules #}
+<div class="filters rule-filters" data-rule-filters>
+  <input type="search" data-rule-search placeholder="Search rules" aria-label="Search rules">
+  <select data-rule-field aria-label="Checks">
+    <option value="">Any condition</option>
+    {% for key, label in filter_fields.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+  </select>
+  <select data-rule-action aria-label="Does">
+    <option value="">Any action</option>
+    {% for key, label in filter_kinds.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+  </select>
+  <button type="button" class="link-button muted small" data-rule-clear hidden>Clear</button>
+  <span class="muted small" data-rule-shown aria-live="polite"></span>
+</div>
+<p class="muted" data-rule-none hidden>No rules match.</p>
+{% endif %}
+
+<section class="card" data-rule-section>
+  <div class="card-head">
+    <h2>Category keywords</h2>
+    <a class="button" href="/rules/new">Add keywords</a>
+  </div>
+  {% if keyword_rules %}
+  <div class="rule-item rule-head muted small" aria-hidden="true">
+    <span class="keyword-category">Category</span><span class="rule-lines">Keywords</span>
+    <span class="rule-count">Matches</span><span class="keyword-controls"></span>
+  </div>
+  <ul class="rule-list">
+    {% for r in keyword_rules %}
+    {% include "_keyword_row.html" %}
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No keywords yet.</p>
+  {% endif %}
+</section>
+
+<section class="card" data-rule-section>
+  <div class="card-head">
+    <h2>Custom rules</h2>
+    <a class="button" href="/rules/new">New rule</a>
+  </div>
+  {% if custom_rules %}
+  <div class="rule-item rule-head muted small" aria-hidden="true">
+    <span class="rule-grip"></span><span class="rule-lines">Conditions</span><span class="rule-lines">Actions</span>
+    <span class="rule-count">Matches</span><span class="rule-controls"></span>
+  </div>
+  <ol class="rule-list" data-rule-order>
+    {% for r in custom_rules %}
+    <li class="rule-item" draggable="true" data-rule-id="{{ r.id }}" id="rule-{{ r.id }}" {{ filter_data(r) }}>
+      <span class="rule-grip muted" aria-hidden="true">⠿</span>
+      <ul class="rule-lines" aria-label="Conditions">{% for line in r.conditions %}<li>{{ line }}</li>{% endfor %}</ul>
+      <ul class="rule-lines" aria-label="Actions">{% for line in r.actions %}<li>{{ line }}</li>{% endfor %}</ul>
+      <span class="rule-count muted small" title="Transactions it matches">{{ '{:,}'.format(r.count) }}</span>
+      <div class="row-actions rule-controls">
+        <form method="post" action="/rules/{{ r.id }}/move"><input type="hidden" name="step" value="-1"><button type="submit" class="link-button" aria-label="Move rule {{ loop.index }} up" title="Move up" {% if loop.first %}disabled{% endif %}>↑</button></form>
+        <form method="post" action="/rules/{{ r.id }}/move"><input type="hidden" name="step" value="1"><button type="submit" class="link-button" aria-label="Move rule {{ loop.index }} down" title="Move down" {% if loop.last %}disabled{% endif %}>↓</button></form>
+        <a class="icon-edit" href="/rules/{{ r.id }}/edit" title="Edit rule" aria-label="Edit rule {{ loop.index }}">{{ icon("pencil") }}</a>
+        {{ delete_menu(r, loop.index) }}
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="muted">No custom rules yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

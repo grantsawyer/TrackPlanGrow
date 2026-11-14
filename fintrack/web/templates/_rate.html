@@ -1,0 +1,4 @@
+{# Savings rate as a percentage, or a dash when there was no income. Usage: {% with rate=x %}{% include "_rate.html" %}{% endwith %} #}
+{%- if rate is none -%}<span class="muted" title="No income this period">—</span>
+{#- round first, then + 0 turns -0.0 into 0.0 (August at -0.05% showed "-0%") -#}
+{%- else -%}{{ '%.0f' | format((rate * 100) | round(0) + 0) }}%{%- endif -%}

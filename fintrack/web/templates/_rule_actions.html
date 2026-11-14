@@ -1,0 +1,35 @@
+{# A rule's or a recurring item's "Then do this" rows (the rule builder's; moved here 2026-11-03 so the recurring window
+   shares them). Import it `with context`: it reads action_labels, categories, names, recurring_items, not_recurring and
+   purpose_accounts. ui.js's builder (data-rule-builder) adds and removes rows. #}
+{% macro act_row(n, a) %}
+{% set current = a.kind if a else 'set_category' %}
+<div class="rule-row" data-rule-row>
+  <select name="act-{{ n }}-kind" aria-label="Action" data-rule-kind>
+    {% for key, label in action_labels.items() %}<option value="{{ key }}" {% if current == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <fieldset data-for="set_description" {% if current != 'set_description' %}hidden disabled{% endif %}>
+    <textarea name="act-{{ n }}-value" rows="1" maxlength="120" placeholder="New description" aria-label="New description">{{ a.value if a and a.kind == 'set_description' }}</textarea>
+  </fieldset>
+  <fieldset data-for="set_category" {% if current != 'set_category' %}hidden disabled{% endif %}>
+    <select name="act-{{ n }}-value" aria-label="Category">
+      <option value="">Choose…</option>
+      {% for heading, group in categories | by_kind %}<optgroup label="{{ heading }}">{% for k in group %}<option value="{{ k.key }}" {% if a and a.kind == 'set_category' and a.value == k.key %}selected{% endif %}>{{ k | category_option }}</option>{% endfor %}</optgroup>{% endfor %}
+    </select>
+  </fieldset>
+  <fieldset data-for="add_tag" {% if current != 'add_tag' %}hidden disabled{% endif %}>
+    <input name="act-{{ n }}-value" list="rule-tag-names" maxlength="40" value="{{ names.tag.get(a.value, a.value) if a and a.kind == 'add_tag' }}" placeholder="Tag" aria-label="Tag">
+  </fieldset>
+  <fieldset data-for="recurring" {% if current != 'recurring' %}hidden disabled{% endif %}>
+    <select name="act-{{ n }}-value" aria-label="Recurring">
+      <option value="{{ not_recurring }}" {% if a and a.kind == 'recurring' and a.value == not_recurring %}selected{% endif %}>Not recurring</option>
+      {% for i in recurring_items %}<option value="{{ i.id }}" {% if a and a.kind == 'recurring' and a.value == i.id | string %}selected{% endif %}>{{ i.name }}</option>{% endfor %}
+    </select>
+  </fieldset>
+  <fieldset data-for="purpose" {% if current != 'purpose' %}hidden disabled{% endif %}>
+    <select name="act-{{ n }}-value" aria-label="Purpose account">
+      {% for p in purpose_accounts %}<option value="{{ p.id }}" {% if a and a.kind == 'purpose' and a.value == p.id | string %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+    </select>
+  </fieldset>
+  <button type="button" class="link-button muted" data-rule-remove aria-label="Remove this action">Remove</button>
+</div>
+{% endmacro %}

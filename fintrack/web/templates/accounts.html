@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% from "_balances.html" import show_toggle, signed, arrow_pct, kind_cards %}
+{% block title %}Balances · Track Plan Grow{% endblock %}
+{# Balances (user's requests 2026-10-12/13): the change in your net worth's value over time, from the daily net-worth
+   snapshots (balances.py), and the Accounts card (moved here from Net worth 2026-10-13). The cards per kind of account
+   and the Change in value table moved to the Net worth page that day (the shared _balances.html). #}
+{# Ribbon: the $ / % toggle for the card's bars (% = each month's % change, $ = the total value at the end of each
+   month), then the date range (default 365 days). #}
+{% block tabbar_controls %}
+<div class="tabbar-group">
+  {{ show_toggle(show, show_links) }}
+  {% include "_range_controls.html" %}
+</div>
+{% endblock %}
+{% block content %}
+<form id="txn-filters" class="form-anchor" method="get" action="/accounts"><input type="hidden" name="show" value="{{ show }}"></form>
+{# The three tiles (this month / last month / range) were removed (user's request 2026-10-13). #}
+
+{{ kind_cards([], show, networth_chart) }}
+
+{# Budgets' sizing (user's request 2026-10-13): the account cards are the main column, like the budget table; the
+   Accounts card takes the summary card's column at the right (325-400px, sticky) from 1200px, and is hidden below
+   (it doesn't move above, unlike the budget summary). .balances-layout in app.css. #}
+<div class="balances-layout">
+<div class="balances-main">
+{# Account cards (user's request 2026-10-13): one per kind of account, each listing its accounts (logo, name, value,
+   last refresh or Manual); the title carries the kind's total value at the end of the period and its $ and % change
+   over it (credit cards: the % of the amount owed, opposite colours). #}
+{# one card per row in the main column (user's request 2026-10-13) #}
+<div class="account-cards">
+{% for c in account_cards %}
+<section class="card account-card">
+  {# the period's change right after the name; the total on the right, in line with the account values below
+     (user's request 2026-10-13) #}
+  <div class="card-head account-card-head">
+    <h2>{{ c.label }} <span class="account-card-change">{{ signed(c.change_cents) }} {{ arrow_pct(c.pct, c.invert) }}</span></h2>
+    <span class="account-card-total {{ 'delta-down' if c.value_cents < 0 and not c.invert else '' }}">{{ c.value_cents | money }}</span>{# with cents, like the rows (user's request 2026-10-13) #}
+  </div>
+  {% if c.accounts %}
+  <table class="data compact account-list">
+    <tbody>
+    {% for a in c.accounts %}
+      {# the whole row opens the account's page (ui.js tr[data-href]); the name is the link for the keyboard #}
+      <tr class="row-link" data-href="/accounts/{{ a.id }}">
+        <td class="logo-col">
+          {%- if a.logo %}<img class="merchant-logo" src="/logos/{{ a.logo }}" alt="" width="20" height="20" loading="lazy">
+          {%- else %}<span class="merchant-logo merchant-initial" aria-hidden="true">{{ (a.institution or a.name or "?")[:1] | upper }}</span>{% endif -%}
+        </td>
+        <td class="clip"><div title="{{ a.name }}"><a class="row-link-name" href="/accounts/{{ a.id }}">{{ a.name }}</a></div>
+          {%- if a.institution %}<div class="muted small" title="{{ a.institution }}">{{ a.institution }}</div>{% endif %}</td>
+        {# no refresh / Manual column (removed, user's request 2026-10-13); a credit card shows its statement balance and
+           a paid indicator or the countdown to its due date (cards.statements; icon + label + colour) #}
+        <td class="muted small nowrap">
+          {%- if a.statement_cents is not none %}{{ a.statement_cents | money }} ·
+            {% if not a.statement_cents %}Nothing due
+            {%- elif a.owed_cents == 0 %}<span class="status-text good">✓ Paid</span>
+            {%- elif a.overdue %}<span class="status-text critical">⚠ Overdue</span>
+            {%- else %}{% if a.due_date %}due {{ a.due_date | date_label }} · {% endif %}<span class="status-text warning">◷ {% if a.days_to_due == 0 %}due today{% elif a.days_to_due is not none %}in {{ a.days_to_due }} day{{ '' if a.days_to_due == 1 else 's' }}{% else %}due{% endif %}</span>{% endif %}
+          {%- endif %}</td>
+        <td class="num">{{ a.value_cents | money }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted small">No accounts.</p>
+  {% endif %}
+</section>
+{% endfor %}
+</div>
+</div>
+<aside class="balances-side">
+{# ---- Summary: kinds of account with their totals and proportion bars (user's requests 2026-10-13; was the
+     Accounts card) ---- #}
+{% include "_balances_summary.html" %}
+{# Accounts left out of net worth (non-USD or no balance); the card above still lists them. #}
+{% if excluded %}
+  <p class="muted small">Not counted:
+    {% for a in excluded %}{{ a.name }}{% if a.mask %} ····{{ a.mask }}{% endif %}
+      ({{ 'no balance reported' if a.current_balance_cents is none else a.iso_currency_code ~ ', not USD' }}){% if not loop.last %}, {% endif %}{% endfor %}.
+  </p>
+{% endif %}
+</aside>
+</div>
+{% endblock %}

@@ -1,0 +1,52 @@
+{# The recurring item's window: add, edit and confirm (user's request 2026-11-03). Two parts, as in the rule builder:
+   "Matches" (what finds its transactions, and its schedule) and "Then do this" (the rule builder's actions, applied to
+   each of its transactions; recurring.ACTION_KINDS). `item` is None when adding; `part` is the class of each part
+   ("card" on its own page; none inside the Recurring page's "Add your own" card). #}
+{% from "_rule_actions.html" import act_row with context %}
+<form method="post" action="/recurring" class="rule-builder" data-rule-builder>
+  <input type="hidden" name="item_id" value="{{ item.id if item else '' }}">
+  <section class="{{ part }}">
+    <h2>Matches</h2>
+    <div class="stacked-form">
+      <label>Name <input name="name" value="{{ item.name if item else '' }}" placeholder="e.g. Paycheck, Rent, Gym" required></label>
+      {% if match %}<p class="muted small">Description like “{{ match.text }}”{% if match.band %}, amount within 10%{% endif %} · {{ match.count }} transaction{{ '' if match.count == 1 else 's' }}</p>{% endif %}
+      <div class="inline-form">
+        <label>Account
+          <select name="account_id">
+            <option value="">— none —</option>
+            {% for a in accounts %}<option value="{{ a.id }}" {% if item and item.account_id == a.id %}selected{% endif %}>{{ a.name }}{% if a.mask %} ····{{ a.mask }}{% endif %}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Money
+          <select name="direction">
+            <option value="out" {% if not item or item.amount_cents > 0 %}selected{% endif %}>out (bill)</option>
+            <option value="in" {% if item and item.amount_cents < 0 %}selected{% endif %}>in (income)</option>
+          </select>
+        </label>
+        <label>Amount <input name="amount" inputmode="decimal" required
+          value="{{ '%.2f' | format((item.amount_cents if item.amount_cents > 0 else -item.amount_cents) / 100) if item else '' }}"></label>
+      </div>
+      <div class="inline-form">
+        <label>How often
+          <select name="frequency">
+            {% for key, label in frequencies.items() %}<option value="{{ key }}" {% if item and item.frequency == key %}selected{% elif not item and key == 'monthly' %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Next date <input type="date" name="next_date" value="{{ item.next_expected_date if item else '' }}" required></label>
+        <label>Days (twice a month only) <input name="days_of_month" size="6" placeholder="1,15"
+          value="{{ item.days_of_month if item and item.frequency == 'semimonthly' else '' }}"></label>
+      </div>
+    </div>
+  </section>
+  <section class="{{ part }}">
+    <h2>Then do this</h2>
+    <div data-rule-rows="act">{% for a in item_actions %}{{ act_row(loop.index0, a) }}{% endfor %}</div>
+    <button type="button" class="secondary" data-rule-add="act">Add action</button>
+  </section>
+  <div class="edit-actions">
+    <button type="submit">{{ 'Confirm' if item and item.status == 'detected' else 'Save' }}</button>
+    {% if item %}<a class="muted" href="/recurring">Cancel</a>{% endif %}
+  </div>
+</form>
+<template data-rule-template="act">{{ act_row('__i__', none) }}</template>
+<datalist id="rule-tag-names">{% for g in all_tags %}<option value="{{ g.name }}">{% endfor %}</datalist>

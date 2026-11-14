@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Budgets · Track Plan Grow{% endblock %}
+{% block tabbar_controls %}
+<div class="tabbar-controls">
+  {# In the ribbon, top right (user's request): step back / forward (arrows only; the label says
+     where each goes; Month view and 1 year: a month, 10 years: a year), then the view toggle. #}
+  {% if view_mode == 'month' %}
+    {% set back = {"href": "/budgets?month=" ~ prev_month, "text": "Previous month (" ~ prev_month | month_label('short') ~ ")"} %}
+    {% set ahead = {"href": "/budgets?month=" ~ next_month, "text": "Next month (" ~ next_month | month_label('short') ~ ")"} %}
+  {% else %}
+    {% set unit = 'a month' if view_mode == 'year' else 'a year' %}
+    {% set back = {"href": "/budgets?view=" ~ view_mode ~ "&start=" ~ prev.start, "text": "Back " ~ unit ~ " (start " ~ prev.label ~ ")"} %}
+    {% set ahead = {"href": "/budgets?view=" ~ view_mode ~ "&start=" ~ next.start, "text": "Ahead " ~ unit ~ " (start " ~ next.label ~ ")"} %}
+  {% endif %}
+  <nav class="seg step-nav" aria-label="Move the budget view">
+    <a href="{{ back.href }}" aria-label="{{ back.text }}" title="{{ back.text }}">←</a>
+    <a href="{{ ahead.href }}" aria-label="{{ ahead.text }}" title="{{ ahead.text }}">→</a>
+  </nav>
+  <nav class="seg" aria-label="Budget view">
+    {%- for key, label in views.items() %}<a href="/budgets{{ '' if key == 'month' else '?view=' ~ key }}"
+      {% if key == view_mode %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor -%}
+  </nav>
+</div>
+{% endblock %}
+{% block content %}
+{% if msg %}<p class="flash ok" role="status">{{ msg }}</p>{% endif %}
+{% if view_mode == 'month' %}
+  {% include "_budget.html" %}
+{% else %}
+  {% include "_budget_plan.html" %}
+{% endif %}
+{% endblock %}

@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Categories · Track Plan Grow{% endblock %}
+{# Categories as a table of categories and subcategories (user's request 2026-10-13: designed like Account types):
+   add, rename, move a subcategory to another category, delete (its transactions move to a category you
+   choose; categories.py). Move to also changes its group, spending / income / transfers (categories.KIND_LABELS); subcategories follow their category.
+   The rules card is on Settings → Rules. #}
+{% from "_icons.html" import category_icon, icon %}
+{# A category's icon (user's request 2026-10-20): the button opens #icon-picker (ui.js) for this category, with the
+   icons its name matches first. data-current = your choice ("" = automatic). #}
+{% macro icon_button(c) -%}
+{%- set shown = icon_of.get(c.key) %}
+<button type="button" class="icon-button" data-icon-picker="/categories/{{ c.key }}/icon" data-icon-current="{{ c.icon or '' }}"
+        data-icon-suggest="{{ icon_suggestions.get(c.key, []) | join(',') }}" data-icon-for="{{ c.label }}"
+        aria-label="Icon for {{ c.label }}: {{ CATEGORY_ICONS[shown].label }}. Change it"
+        title="{{ CATEGORY_ICONS[shown].label }}{{ '' if c.icon else ' (automatic)' }}">{{ category_icon(shown, 18) }}</button>
+{%- endmacro %}
+{% macro count(n) -%}{{ n }} transaction{{ '' if n == 1 else 's' }}{%- endmacro %}
+{# the count alone, its meaning on hover and for screen readers (user's request 2026-10-23); a link to those
+   transactions, all dates (a category's include its subcategories'; user's request 2026-10-25) #}
+{% macro count_cell(n, key) -%}
+{%- if n -%}<a class="muted small" href="/transactions?range=custom&amp;category={{ key | urlencode }}" title="Show the {{ count(n) }}" aria-label="{{ count(n) }}">{{ '{:,}'.format(n) }}</a>
+{%- else -%}<span class="muted small" title="{{ count(n) }}" aria-label="{{ count(n) }}">{{ '{:,}'.format(n) }}</span>{%- endif -%}
+{%- endmacro %}
+{% macro delete_button(c, default_target, excluded) -%}
+{% if c.key in protected %}<span class="muted small" title="The app relies on this category">Built in</span>
+{% else %}
+<details class="confirm-delete">
+  {# a trash can, not "Delete…" (user's request 2026-10-25); it still opens the confirmation #}
+  <summary class="icon-delete" title="Delete {{ c.label }}" aria-label="Delete {{ c.label }}">{{ icon("trash") }}</summary>
+  <form method="post" action="/categories/{{ c.key }}/delete" class="inline-form">
+    <label class="small">Delete {{ c.label }}{% if c.children %} and its {{ c.children | length }} subcategories{% endif %}; move its {{ count(c.count) }} to
+      <select name="target" aria-label="Move its transactions to">
+        {% for heading, group in categories | rejectattr("key", "in", excluded) | list | by_kind %}<optgroup label="{{ heading }}">{% for o in group %}<option value="{{ o.key }}" {% if o.key == default_target %}selected{% endif %}>{{ o | category_option }}</option>{% endfor %}</optgroup>{% endfor %}
+      </select></label>
+    <button type="submit" class="danger">Delete</button>
+  </form>
+</details>
+{% endif %}
+{%- endmacro %}
+{# Move to (user's requests 2026-11-02; categories.move): an icon opening a menu. A group (spending, transfers, income) is itself a
+   choice, making it its own category there; that group's categories are indented under it, moving it into them. Grayed out and
+   unselectable: where it is now and itself; with subcategories of its own, every category too (two levels only). #}
+{% macro move_to(c, parent) -%}
+<form method="post" action="/categories/{{ c.key }}/move" class="ar-pick ar-move">
+  <details class="pop-button move-menu" data-popover>
+    <summary class="icon-move" title="Move {{ c.label }}" aria-label="Move {{ c.label }}">{{ icon("up-down") }}</summary>
+    <div class="pop-panel move-panel">
+      <div class="move-title">Move to…</div>
+      {% for kind in kind_order %}
+      <button type="submit" name="parent" value="group:{{ kind }}" class="move-option move-group" {% if not parent and c.kind == kind %}disabled{% endif %}>{{ kind_labels[kind] }}</button>
+      {% for other in tree if other.kind == kind %}
+      <button type="submit" name="parent" value="{{ other.key }}" class="move-option move-child" {% if c.children or other.key == c.key or (parent and parent.key == other.key) %}disabled{% endif %}>{{ other.label }}</button>
+      {% endfor %}
+      {% endfor %}
+    </div>
+  </details>
+</form>
+{%- endmacro %}
+{% block content %}
+{% if msg %}<p class="flash ok" role="status">{{ msg }}</p>{% endif %}
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+{# saving a change keeps your place on the page (ui.js data-keep-scroll; user's request 2026-10-25) #}
+<div data-keep-scroll>
+{# grouped by what they count as: spending, transfers, income (categories.KIND_ORDER; user's request 2026-10-25) #}
+{% for kind in kind_order %}
+{% set group = tree | selectattr('kind', 'equalto', kind) | list %}
+{% set new_open = open_panel == 'group:' ~ kind %}
+<div class="category-group" id="group-{{ kind }}">
+<div class="category-group-head">
+  <h2>{{ kind_labels[kind] }}</h2>
+  <button type="button" class="secondary group-add" data-toggle-panel="add-category-{{ kind }}" aria-expanded="{{ 'true' if new_open else 'false' }}" aria-controls="add-category-{{ kind }}">Add category</button>
+</div>
+{# A new category for this group: its icon and name, or one of Plaid's (user's request 2026-11-02). The icon is held in the form
+   until Add (ui.js data-icon-target). A Plaid one is added at once and the card stays open: htmx swaps only this group. #}
+<section class="card type-card new-category" id="add-category-{{ kind }}" {% if not new_open %}hidden{% endif %}>
+  <form method="post" action="/categories" class="add-form">
+    <input type="hidden" name="kind" value="{{ kind }}">
+    <input type="hidden" name="icon" value="" id="new-icon-{{ kind }}">
+    <button type="button" class="icon-button" data-icon-picker="" data-icon-target="new-icon-{{ kind }}" data-icon-for="the new category"
+            aria-label="Choose the new category's icon" title="Choose an icon">{{ category_icon(kind_icons[kind], 18) }}</button>
+    <label class="edit-field"><span>New category</span>
+      <input name="label" maxlength="40" required aria-label="New {{ kind_labels[kind] }} category"></label>
+    <button type="submit" class="secondary add-button">Add</button>
+  </form>
+  {% if plaid_categories.get(kind) %}
+  <div class="plaid-options">
+    <div class="muted small">From Plaid</div>
+    <ul>
+      {% for o in plaid_categories[kind] %}
+      <li>
+        <span>{{ o.label }} <span class="muted small" title="Transactions with this Plaid category">{{ '{:,}'.format(o.count) }}</span></span>
+        <button type="button" class="secondary add-button" hx-post="/categories/plaid-category" hx-vals='{"key": "{{ o.key }}", "kind": "{{ kind }}"}'
+                hx-target="#group-{{ kind }}" hx-select="#group-{{ kind }}" hx-swap="outerHTML" aria-label="Add {{ o.label }} to {{ kind_labels[kind] }}">Add</button>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</section>
+{% for t in group %}
+{% set family = [t.key] + (t.children | map(attribute='key') | list) %}
+<section class="card type-card" id="card-{{ t.key }}">
+  {# rows laid out like Account types (user's request 2026-10-25): every row in every card is the same grid
+     (.ar-row: icon + name · count · Move to · delete), so the columns line up down the page #}
+  {# clicking anywhere on the row that isn't a control opens or closes its panel (ui.js; user's request 2026-11-02) #}
+  <div class="ar-row ar-head no-order" data-panel-row="add-sub-{{ t.key }}">
+    <div class="ar-name icon-and-name">
+      {{ icon_button(t) }}
+      <form method="post" action="/categories/{{ t.key }}/rename" class="inline-form">
+        <input name="label" value="{{ t.label }}" maxlength="40" required aria-label="Category name" class="type-name" data-autosubmit>
+        <noscript><button type="submit" class="secondary">Rename</button></noscript>
+      </form>
+      {# adds a subcategory in a panel under the row (ui.js data-toggle-panel; user's request 2026-11-02) #}
+      <button type="button" class="icon-add" data-toggle-panel="add-sub-{{ t.key }}" aria-expanded="{{ 'true' if open_panel == t.key else 'false' }}" aria-controls="add-sub-{{ t.key }}" title="Add a subcategory" aria-label="Add a subcategory to {{ t.label }}">{{ icon("plus") }}</button>
+    </div>
+    <div class="ar-count">{{ count_cell(t.count, t.key) }}</div>
+    {# phones: ⋮ shows the row's +, Move to and delete on a line under it (ui.js data-row-more; user's choices
+       2026-11-11); this + is the phone's (the one beside the name is hidden there), same panel #}
+    <button type="button" class="icon-more phone-only" data-row-more aria-expanded="false" title="More" aria-label="More for {{ t.label }}">{{ icon("more") }}</button>
+    <button type="button" class="icon-add ar-add phone-only" data-toggle-panel="add-sub-{{ t.key }}" aria-expanded="{{ 'true' if open_panel == t.key else 'false' }}" aria-controls="add-sub-{{ t.key }}" title="Add a subcategory" aria-label="Add a subcategory to {{ t.label }}">{{ icon("plus") }}</button>
+    {{ move_to(t, none) }}
+    <div class="ar-delete">{{ delete_button(t, 'UNCATEGORIZED', family) }}</div>
+  </div>
+  <div class="add-panel" id="add-sub-{{ t.key }}" {% if open_panel != t.key %}hidden{% endif %}>
+    <form method="post" action="/categories/{{ t.key }}/add" class="add-form">
+      <label class="edit-field"><span>New subcategory</span>
+        <input name="label" maxlength="40" required aria-label="New subcategory of {{ t.label }}"></label>
+      <button type="submit" class="secondary add-button">Add</button>
+    </form>
+    {# Plaid's subcategories seen on your transactions, added one at a time (user's request 2026-11-02): the panel stays open and
+       only this card is swapped, so one just moves from here into the list below. #}
+    {% if plaid_options.get(t.key) %}
+    <div class="plaid-options">
+      <div class="muted small">From Plaid</div>
+      <ul>
+        {% for o in plaid_options[t.key] %}
+        <li>
+          <span>{{ o.label }} <span class="muted small" title="Transactions with this Plaid subcategory">{{ '{:,}'.format(o.count) }}</span></span>
+          <button type="button" class="secondary add-button" hx-post="/categories/{{ t.key }}/plaid-sub" hx-vals='{"code": "{{ o.code }}"}'
+                  hx-target="#card-{{ t.key }}" hx-select="#card-{{ t.key }}" hx-swap="outerHTML" aria-label="Add {{ o.label }} to {{ t.label }}">Add</button>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+  {% for c in t.children %}
+  <div class="ar-row ar-sub no-order">
+    <div class="ar-name icon-and-name">
+      {{ icon_button(c) }}
+      <form method="post" action="/categories/{{ c.key }}/rename" class="inline-form">
+        <input name="label" value="{{ c.label }}" maxlength="40" required aria-label="Subcategory name" data-autosubmit>
+        <noscript><button type="submit" class="secondary">Rename</button></noscript>
+      </form>
+    </div>
+    <div class="ar-count">{{ count_cell(c.count, c.key) }}</div>
+    <button type="button" class="icon-more phone-only" data-row-more aria-expanded="false" title="More" aria-label="More for {{ c.label }}">{{ icon("more") }}</button>
+    {{ move_to(c, t) }}
+    <div class="ar-delete">{{ delete_button(c, t.key, [c.key]) }}</div>
+  </div>
+  {% endfor %}
+</section>
+{% endfor %}
+</div>
+{% endfor %}
+{# The icon picker, shared by every category (ui.js sets the form's action and marks the current choice). Each icon
+   is a submit button posting its name; "Automatic" posts "" (category_icons.resolve decides). The search box hides
+   icons whose name and keywords don't contain what you type. #}
+<dialog id="icon-picker" class="icon-picker" aria-labelledby="icon-picker-title">
+  <form method="post" action="/categories" data-icon-form>
+    <h2 id="icon-picker-title">Icon for <span data-icon-title></span></h2>
+    <input type="search" placeholder="Search icons" aria-label="Search icons" data-icon-search autocomplete="off">
+    <section data-icon-section="suggested">
+      <h3>Matches the name</h3>
+      <div class="icon-grid" data-icon-suggested></div>
+    </section>
+    {% for group, icons in icon_groups %}
+    <section data-icon-section="{{ group }}">
+      <h3>{{ group }}</h3>
+      <div class="icon-grid">
+        {% for i in icons %}<button type="submit" name="icon" value="{{ i.name }}" class="icon-choice" title="{{ i.label }}"
+          aria-label="{{ i.label }}" aria-pressed="false" data-icon-keywords="{{ (i.label ~ ' ' ~ i.keywords | join(' ')) | lower }}">
+          {{- category_icon(i.name, 20) }}</button>{% endfor %}
+      </div>
+    </section>
+    {% endfor %}
+    <div class="actions">
+      <button type="submit" name="icon" value="" class="secondary" data-icon-auto>Automatic</button>
+      <button type="button" class="secondary" data-icon-cancel>Cancel</button>
+    </div>
+  </form>
+</dialog>
+</div>
+{% endblock %}

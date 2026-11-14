@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Finishing connection · Track Plan Grow{% endblock %}
+{% block head_scripts %}{% include "_link_scripts.html" %}{% endblock %}
+{% block content %}
+<p class="muted" id="oauth-resume">Returning from your bank's sign-in page. Plaid Link will reopen to finish.</p>
+<p class="flash bad" id="link-error" hidden></p>
+<p><a href="/setup">Back to Setup</a></p>
+{% endblock %}

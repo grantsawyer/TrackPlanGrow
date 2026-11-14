@@ -1,0 +1,25 @@
+{# Budgets: "+ Add budget" (one form: a section + an existing category or a new name), in every view's toolbar (user's
+   request 2026-10-28: the 1-year and 10-year views too). The Month view swaps its table in place (HTMX, `month`); the
+   1-year / 10-year views post and come back to the same range (`here`), a refusal shown as a message. #}
+<details class="add-budget" data-popover>
+  <summary class="button secondary">+ Add budget</summary>
+  <form class="inline-form" {% if view_mode in ('year', 'decade') %}method="post" action="/budgets/lines"{% else %}hx-post="/budgets/lines" {{ swap | safe }}{% endif %}>
+    {% if view_mode in ('year', 'decade') %}<input type="hidden" name="back" value="{{ here }}">
+    {% else %}<input type="hidden" name="month" value="{{ month }}">{% endif %}
+    <label>Section
+      <select name="section">
+        {% for key, (label, _) in sections.items() %}<option value="{{ key }}" {% if loop.last %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select></label>
+    <select name="category" aria-label="Existing category to add">
+      <option value="">Choose an existing category…</option>
+      {% for kind, group in (('tag', 'Tags'), ('expense', 'Spending categories'), ('income', 'Income categories')) %}
+        {% if choices[kind] %}<optgroup label="{{ group }}">
+          {% for c in choices[kind] %}<option value="{{ c.key }}"{% if c.disabled %} disabled{% endif %}>{{ c | category_option }}</option>{% endfor %}
+        </optgroup>{% endif %}
+      {% endfor %}
+    </select>
+    <span class="muted small">or</span>
+    <input name="name" placeholder="New category name" aria-label="New category name">
+    <button type="submit">Add</button>
+  </form>
+</details>

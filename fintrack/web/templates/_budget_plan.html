@@ -1,0 +1,173 @@
+{# Budgets: the 1-year (12 monthly columns from any month) and 10-year (10 annual columns) views.
+   Past months are actuals, the current month and later are budget amounts (budgets.plan).
+   In the 1-year view those budget cells are editable: changing one opens #scope-dialog (_scope_dialog.html, ui.js),
+   which submits #plan-save for this month only or this month and every month after; the server
+   returns this fragment again. Sections collapse like the Month view (ui.js). #}
+{% set yearly = view_mode == 'decade' %}
+<div id="budget-plan">
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+
+{# ---------------- Summary: totals for the whole range, as shares of income (user's request) ---------------- #}
+{% set inc = plan.income_total %}
+{# One figure: a colour swatch (matching its segment in the stacked bar) + label, then the amount and
+   its share of income: "$18,600 (31%)", same size, % not bold (user's request). #}
+{% macro share(label, cents, slot) -%}
+  <div class="r-part">
+    <div class="kpi-label"><span class="swatch {{ slot }}" aria-hidden="true"></span>{{ label }}</div>
+    <div class="tile-value {{ 'delta-down' if cents < 0 else '' }}">{{ cents | money_whole }}
+      {%- if inc > 0 %} <span class="share-pct">({{ '%.0f' | format(cents / inc * 100) }}%)</span>{% endif %}</div>
+  </div>
+{%- endmacro %}
+{# Summary beside the table on wide windows, above it on narrow ones: same breakpoint and CSS
+   as the Month view (.budget-layout, user's request). #}
+<div class="budget-layout">
+<section class="card budget-summary budget-side">
+  <h2 class="summary-month">{{ title }}</h2>
+  {# Named areas (CSS): on top, Income at the left and the stacked bar above the figures; at the side, one column:
+     Income, bar, then each spending section and Savings (user's request). #}
+  <div class="summary-grid range-grid">
+    {# The headline figure, like Left to budget on the Month card (centred at the side). #}
+    <div class="left-to-budget r-inc">
+      <div class="kpi-label">Income</div>
+      <div class="hero-value">{{ inc | money_whole }}</div>
+    </div>
+    {# The spending sections of the framework shown: Fixed / Flexible, Needs / Wants, or your groups (user's requests
+       2026-10-28), in palette order with Savings keeping slot 3 (its green) whatever the number of groups. #}
+    {% set slots = ['slot-1', 'slot-2', 'slot-4', 'slot-5', 'slot-6', 'slot-7'] %}
+    {% set saved = plan.savings_total %}
+    {% set ns = namespace(parts=[], spent=0, names=[]) %}
+    {% for s in plan.sections[1:] %}{% set cents = plan.section_total(s.key) %}
+      {% set ns.parts = ns.parts + [(slots[loop.index0], cents)] %}{% set ns.spent = ns.spent + cents %}
+      {% set ns.names = ns.names + [s.label | lower ~ ' ' ~ (cents | money_whole)] %}{% endfor %}
+    <div class="r-parts">
+      {% for s in plan.sections[1:] %}{{ share(s.label, ns.parts[loop.index0][1], slots[loop.index0]) }}{% endfor %}
+      {{ share("Savings", saved, 'slot-3') }}
+    </div>
+  {# How income splits: one stacked bar (user's request). Shares of income; if spending exceeds
+     income there's no savings segment and the spending sections are shares of total spending. #}
+  {% set whole = [inc, ns.spent] | max %}
+  {% set parts = ns.parts + [('slot-3', [saved, 0] | max)] %}
+  <div class="stack-bar r-bar" role="img" aria-label="Income split: {{ ns.names | join(', ') }}, savings {{ saved | money_whole }}">
+    {%- if whole > 0 %}{% for slot, cents in parts %}{% if cents > 0 %}<span class="meter-fill {{ slot }}" data-share="{{ '%.4f' | format(cents / whole) }}"></span>{% endif %}{% endfor %}{% endif -%}
+  </div>
+  </div>
+</section>
+
+{# `href`: a past month's actual links to that month's transactions (1-year view). #}
+{% macro cell(cents, past, href=none) -%}
+  <td class="num {{ 'planned' if not past else '' }} {{ 'delta-down' if cents < 0 else '' }}">
+    {%- if cents and href %}<a href="{{ href }}">{{ cents | money_whole }}</a>{% else %}{{ cents | money_whole if cents else '—' }}{% endif -%}
+  </td>
+{%- endmacro %}
+
+<section class="card budget-main" data-keep-scroll>
+  {# Same toggle as the Month view (shared state, ui.js). Here a line is grouped only when it has
+     no budget and no actual anywhere in this range. #}
+  <div class="budget-tools">
+    {% include "_budget_add_group.html" %}
+    {% include "_budget_add_line.html" %}
+    {% with group_label = "Group lines without a budget or actuals" %}{% include "_budget_settings.html" %}{% endwith %}
+  </div>
+  {# Its own scroll box (both ways), so the month header and category column stay frozen. #}
+  <div class="table-wrap plan-wrap">
+    <table class="data plan-table">
+      {# Equal-width columns; past (actual) columns shaded, a divider where budgets begin (user's request).
+         Total column: 10-year view only (user removed it from the 1-year view). #}
+      <colgroup>
+        <col class="col-label">
+        {% for c in plan.columns %}
+        {% set starts_budget = c.basis != 'actual' and not loop.first and plan.columns[loop.index0 - 1].basis == 'actual' %}
+        <col class="col-{{ c.basis }} {{ 'col-first-budget' if starts_budget else '' }}">
+        {% endfor %}
+        {% if yearly %}<col class="col-total">{% endif %}
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Category</th>
+          {% for c in plan.columns %}
+          <th class="num {{ 'basis-actual' if c.basis == 'actual' else '' }}">{{ c.key if yearly else c.key | month_label('short') }}
+            <div class="basis">{{ {'actual': 'actual', 'budget': 'budget', 'mixed': 'actual + budget'}[c.basis] }}</div></th>
+          {% endfor %}
+          {% if yearly %}<th class="num">Total</th>{% endif %}
+        </tr>
+      </thead>
+
+      {% for s in plan.sections %}
+      <tbody data-section="{{ s.key }}">
+        {% set totals = s.totals %}
+        <tr class="section-row">
+          {% include "_budget_section_head.html" %}
+          {% for c in plan.columns %}<th class="num">{{ (totals[loop.index0] if totals else 0) | money_whole }}</th>{% endfor %}
+          {% if yearly %}<th class="num">{{ (totals | sum if totals else 0) | money_whole }}</th>{% endif %}
+        </tr>
+        {# "Non-budgeted items" sits right above the empty lines (sorted last), so opening it shows them below. #}
+        {% set empties = s.lines | selectattr('empty') | list %}
+        {% set group = namespace(shown=not empties) %}
+        {% set group_row %}
+        <tr class="nobudget-group">
+          <td><button type="button" class="link-button" data-group-open="{{ s.key }}" aria-expanded="false">Non-budgeted items ({{ empties | length }})</button></td>
+          {% for c in plan.columns %}<td class="num"><span class="muted">—</span></td>{% endfor %}
+          {% if yearly %}<td class="num"><span class="muted">—</span></td>{% endif %}
+        </tr>
+        {% endset %}
+        {% for l in s.lines %}
+        {% if l.empty and not group.shown %}{{ group_row }}{% set group.shown = true %}{% endif %}
+        <tr class="{{ 'nobudget' if l.empty else '' }}">
+          {# Category name: all its transactions, newest first (Transactions filters by single month only). #}
+          {% set which = 'tag=%d' | format(l.tag.tag_id) if l.tag else 'category=' ~ l.category %}
+          <td><a href="/transactions?{{ which }}">{{ l.label }}</a></td>
+          {% for c in plan.columns %}
+            {% set amount = l.budgets[loop.index0] if l.budgets else none %}
+            {% if not yearly and (l.editable or l.tag) and c.basis == 'budget' %}
+            <td class="num"><input id="plan-{{ l.category }}-{{ c.key }}" class="amount plan-amount" placeholder="—" autocomplete="off"
+              {# Whole dollars on screen (user's choice); the exact stored amount shows while editing. #}
+              value="{{ amount | money_whole if amount is not none else '' }}" data-original="{{ amount | money_whole if amount is not none else '' }}"
+              data-exact="{{ '%.2f' | format(amount / 100) if amount is not none else '' }}"
+              {{ 'data-direct-form' if l.tag else 'data-scope-form' }}="plan-save" data-category="{{ l.category }}" data-month="{{ c.key }}" data-month-label="{{ c.key | month_label('short') }}"
+              aria-label="{{ l.label }} budget for {{ c.key | month_label }}"
+              title="An amount, or a calculation like =795/12"></td>
+            {% else %}{{ cell(l.values[loop.index0], c.basis == 'actual',
+                              '/transactions?month=' ~ c.key ~ '&' ~ which if not yearly and c.basis == 'actual' else none) }}{% endif %}
+          {% endfor %}
+          {% if yearly %}<td class="num">{{ l.values | sum | money_whole }}</td>{% endif %}
+        </tr>
+        {% endfor %}
+        {% if s.outside %}
+        <tr class="outside">
+          <td>Not in budget</td>
+          {% for c in plan.columns %}{{ cell(s.outside[loop.index0], c.basis == 'actual') }}{% endfor %}
+          {% if yearly %}<td class="num">{{ s.outside | sum | money_whole }}</td>{% endif %}
+        </tr>
+        {% endif %}
+      </tbody>
+      {% endfor %}
+
+      {# Savings per column: income − expenses for that month / year only (nothing carried over). #}
+      <tbody data-section="savings">
+        <tr class="section-row">
+          <th scope="rowgroup">Savings</th>
+          {% for v in plan.savings %}<th class="num {{ 'delta-down' if v < 0 else '' }}">{{ v | money_whole if v else '—' }}</th>{% endfor %}
+          {% if yearly %}<th class="num {{ 'delta-down' if plan.savings | sum < 0 else '' }}">{{ plan.savings | sum | money_whole }}</th>{% endif %}
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="muted small table-note">
+    Columns marked <em>actual</em> are what happened; <em>budget</em> columns use your budget amounts
+    (the current month counts as budget until it ends){% if yearly %}; a year marked <em>actual + budget</em>
+    adds both{% endif %}.
+    {% if yearly %}Edit amounts in the <a href="/budgets">Month view</a> or the 1-year view.
+    {% else %}Change a budget cell to set it for that month only, or for that month and every month after.{% endif %}
+  </p>
+</section>
+</div>
+
+{% if not yearly %}
+{# Filled and submitted by ui.js once you choose in the dialog. #}
+<form id="plan-save" hx-post="/budgets/plan-amount" hx-target="#budget-plan" hx-swap="outerHTML" hidden>
+  <input type="hidden" name="category"><input type="hidden" name="month"><input type="hidden" name="amount">
+  <input type="hidden" name="scope"><input type="hidden" name="start" value="{{ plan_start }}">
+</form>
+{% include "_scope_dialog.html" %}
+{% endif %}
+</div>

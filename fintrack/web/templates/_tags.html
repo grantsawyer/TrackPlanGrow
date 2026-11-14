@@ -1,0 +1,7 @@
+{# Tag chips (tags.py, user's request 2026-10-28): a transaction's tags after its description, the same in the list and
+   in the row the edit panel's Tags line refreshes (its id lets that swap them in place). `oob`: sent out of band. `with_id=False`: a second copy of the row on the page (the review card): ids stay unique. #}
+{% macro tag_chips(transaction_id, found, oob=False, with_id=True) -%}
+<span class="txn-tags"{% if with_id %} id="txn-tags-{{ transaction_id }}"{% endif %}{% if oob %} hx-swap-oob="true"{% endif %}>
+  {%- for g in found %}<span class="tag-chip">{{ g.name }}</span>{% endfor -%}
+</span>
+{%- endmacro %}

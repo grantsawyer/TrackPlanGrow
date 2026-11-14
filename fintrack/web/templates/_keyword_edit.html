@@ -1,0 +1,16 @@
+{# Editing a keywords row in place (user's request 2026-11-02): only its category and keywords, one per line. #}
+<li class="rule-item keyword-editing" data-rule-id="{{ r.id }}" id="rule-{{ r.id }}">
+  <form class="keyword-edit" hx-post="/rules/{{ r.id }}/keywords" hx-target="closest li" hx-swap="outerHTML">
+    <select name="category" class="keyword-category" aria-label="Category">
+      {% for heading, group in categories | by_kind %}<optgroup label="{{ heading }}">{% for c in group %}<option value="{{ c.key }}" {% if c.key == category %}selected{% endif %}>{{ c | category_option }}</option>{% endfor %}</optgroup>{% endfor %}
+    </select>
+    <div class="keyword-box">
+      <textarea name="keywords" rows="2" autofocus aria-label="Keywords, one per line">{{ keywords }}</textarea>
+      {% if error %}<p class="flash-inline bad" role="alert">{{ error }}</p>{% endif %}
+    </div>
+    <div class="keyword-buttons">
+      <button type="submit">Save</button>
+      <button type="button" class="link-button muted" hx-get="/rules/{{ r.id }}/keyword-row" hx-target="closest li" hx-swap="outerHTML">Cancel</button>
+    </div>
+  </form>
+</li>

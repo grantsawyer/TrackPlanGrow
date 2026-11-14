@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Account types · Track Plan Grow{% endblock %}
+{% from "_icons.html" import icon %}
+{# Your account types and subtypes (user's request 2026-10-13; account_types.py). A type's behaviour decides asset or
+   liability, which Balances / Net worth card and retirement vs investment; subtypes follow their type. #}
+{% macro order_buttons(node) -%}
+<form method="post" action="/account-types/{{ node.id }}/order" class="inline-form">
+  <button type="submit" name="direction" value="up" class="link-button" aria-label="Move {{ node.name }} up" title="Move up">↑</button>
+  <button type="submit" name="direction" value="down" class="link-button" aria-label="Move {{ node.name }} down" title="Move down">↓</button>
+</form>
+{%- endmacro %}
+{# accounts on a node: given it + matched automatically (user's request 2026-10-13), e.g. "3 accounts (2 automatic)" #}
+{% macro count(node) -%}
+{{ node.shown }} account{{ '' if node.shown == 1 else 's' }}{% if node.automatic %} ({{ node.automatic }} automatic){% endif %}
+{%- endmacro %}
+{# the number alone, its meaning on hover and for screen readers, as on Categories (user's request 2026-10-25) #}
+{% macro count_cell(node) -%}
+<span class="ar-count muted small" title="{{ count(node) }}" aria-label="{{ count(node) }}">{{ '{:,}'.format(node.shown) }}</span>
+{%- endmacro %}
+{% macro delete_button(node) -%}
+<details class="confirm-delete">
+  {# a trash can, as on Categories (user's request 2026-10-25); it still opens the confirmation #}
+  <summary class="icon-delete" title="Delete {{ node.name }}" aria-label="Delete {{ node.name }}">{{ icon("trash") }}</summary>
+  <form method="post" action="/account-types/{{ node.id }}/delete" class="inline-form">
+    <span class="small">Delete {{ node.name }}{% if node.children %} and its {{ node.children | length }} subtypes{% endif %}?
+      {% set used = node.accounts + (node.children | sum(attribute='accounts')) %}
+      {% if used %}{{ used }} account{{ '' if used == 1 else 's' }} go back to automatic.{% endif %}</span>
+    <button type="submit" class="danger">Delete</button>
+  </form>
+</details>
+{%- endmacro %}
+{% block content %}
+{% if msg %}<p class="flash ok" role="status">{{ msg }}</p>{% endif %}
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+{# Laid out like Categories (user's request 2026-10-25): names save when changed, the count alone (its meaning on
+   hover), the trash can at the far right, subtypes indented. Every row - a type's head and its subtypes, in every
+   card - is the same grid (.ar-row: name · count · Counts as / Move to · order · delete), so the columns line up
+   down the whole page. Saving keeps your place (ui.js data-keep-scroll). #}
+<div data-keep-scroll>
+{% for t in types %}
+<section class="card type-card">
+  <div class="ar-row ar-head" data-panel-row="add-sub-{{ t.id }}">
+    <div class="ar-name icon-and-name">
+      <form method="post" action="/account-types/{{ t.id }}/rename" class="inline-form">
+        <input name="name" value="{{ t.name }}" maxlength="40" required aria-label="Type name" class="type-name" data-autosubmit>
+        <noscript><button type="submit" class="secondary">Rename</button></noscript>
+      </form>
+      {# adds a subtype in a panel under the row, as on Categories (user's request 2026-11-02) #}
+      <button type="button" class="icon-add" data-toggle-panel="add-sub-{{ t.id }}" aria-expanded="false" aria-controls="add-sub-{{ t.id }}" title="Add a subtype" aria-label="Add a subtype to {{ t.name }}">{{ icon("plus") }}</button>
+    </div>
+    <form method="post" action="/account-types/{{ t.id }}/kind" class="ar-pick">
+      <label class="small muted"><span>Counts as</span> <select name="kind" data-autosubmit aria-label="What {{ t.name }} counts as">
+        {% for key, label in kinds.items() %}<option value="{{ key }}" {% if t.kind == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select></label>
+    </form>
+    {{ count_cell(t) }}
+    {# phones: ⋮ shows the row's +, order arrows, Move to and delete on a line under it (ui.js data-row-more,
+       2026-11-11); this + is the phone's (the one beside the name is hidden there), same panel #}
+    <button type="button" class="icon-more phone-only" data-row-more aria-expanded="false" title="More" aria-label="More for {{ t.name }}">{{ icon("more") }}</button>
+    <button type="button" class="icon-add ar-add phone-only" data-toggle-panel="add-sub-{{ t.id }}" aria-expanded="false" aria-controls="add-sub-{{ t.id }}" title="Add a subtype" aria-label="Add a subtype to {{ t.name }}">{{ icon("plus") }}</button>
+    <div class="ar-order">{{ order_buttons(t) }}</div>
+    <div class="ar-delete">{{ delete_button(t) }}</div>
+  </div>
+  <div class="add-panel" id="add-sub-{{ t.id }}" hidden>
+    <form method="post" action="/account-types/{{ t.id }}/add" class="add-form">
+      <label class="edit-field"><span>New subtype</span>
+        <input name="name" maxlength="40" required aria-label="New subtype of {{ t.name }}"></label>
+      <button type="submit" class="secondary add-button">Add</button>
+    </form>
+  </div>
+  {% for c in t.children %}
+  <div class="ar-row ar-sub">
+    <form method="post" action="/account-types/{{ c.id }}/rename" class="inline-form ar-name">
+      <input name="name" value="{{ c.name }}" maxlength="40" required aria-label="Subtype name" data-autosubmit>
+      <noscript><button type="submit" class="secondary">Rename</button></noscript>
+    </form>
+    {{ count_cell(c) }}
+    <button type="button" class="icon-more phone-only" data-row-more aria-expanded="false" title="More" aria-label="More for {{ c.name }}">{{ icon("more") }}</button>
+    {# an icon opening a menu of the types, as on Categories (user's request 2026-11-02); where it is now is grayed out #}
+    <form method="post" action="/account-types/{{ c.id }}/move" class="ar-pick ar-move">
+      <details class="pop-button move-menu" data-popover>
+        <summary class="icon-move" title="Move {{ c.name }}" aria-label="Move {{ c.name }} to another type">{{ icon("up-down") }}</summary>
+        <div class="pop-panel move-panel">
+          <div class="move-title">Move to…</div>
+          {% for other in types %}<button type="submit" name="parent" value="{{ other.id }}" class="move-option" {% if other.id == t.id %}disabled{% endif %}>{{ other.name }}</button>{% endfor %}
+        </div>
+      </details>
+    </form>
+    <div class="ar-order">{{ order_buttons(c) }}</div>
+    <div class="ar-delete">{{ delete_button(c) }}</div>
+  </div>
+  {% endfor %}
+</section>
+{% endfor %}
+<section class="card">
+  <div class="card-head"><h2>Add a type</h2></div>
+  <form method="post" action="/account-types/add" class="inline-form">
+    <input name="name" maxlength="40" required placeholder="Name" aria-label="New type name">
+    <label class="small muted">Counts as <select name="kind" aria-label="What the new type counts as">
+      {% for key, label in kinds.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+    </select></label>
+    <button type="submit">Add type</button>
+  </form>
+</section>
+</div>
+{% endblock %}

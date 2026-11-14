@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Transfers · Track Plan Grow{% endblock %}
+{# Transfers (Settings section, user's request 2026-10-26): the transfers matched between your own accounts over the range
+   in the ribbon (Savings' control, default YTD), added up by route, then each pair with a button to remove its match,
+   then the transactions with no match that could be matched (transfers.match_options: only partners that meet the
+   matching rules are offered). web/transfers.py; the forms post back here and keep the date range. #}
+{% macro keep_range() -%}
+<input type="hidden" name="range" value="{{ period.key }}"><input type="hidden" name="from" value="{{ period.start }}"><input type="hidden" name="to" value="{{ period.end }}">
+{%- endmacro %}
+{% macro account(h) -%}{{ h.account }}{% if h.mask %} <span class="muted small">····{{ h.mask }}</span>{% endif %}{%- endmacro %}
+{# one side of a transfer: its account, then its description (linked to it on Transactions) and, when it isn't the row's
+   date, its own date #}
+{% macro side(h, row_date=None) -%}
+<div>{{ account(h) }}</div>
+<a class="muted small" href="/transactions?range=custom&amp;from={{ h.date }}&amp;to={{ h.date }}&amp;account={{ h.account_id }}&amp;q={{ ('"' ~ h.description | replace('"', '') ~ '"') | urlencode }}">{{ h.description }}</a>
+{%- if row_date and h.date != row_date %} <span class="muted small">· {{ h.date | date_label }}</span>{% endif %}
+{%- endmacro %}
+{% macro amount(cents) -%}
+{% if cents < 0 %}+{{ (-cents) | money }}{% else %}{{ cents | money }}{% endif %}
+{%- endmacro %}
+{% macro partner_label(p, was) -%}
+{{ p.date | date_label }} · {{ p.account }}{% if p.mask %} ····{{ p.mask }}{% endif %} · {{ p.description }}{% if was %} (matched with {{ was.account }}{% if was.mask %} ····{{ was.mask }}{% endif %}){% endif %}
+{%- endmacro %}
+{% block tabbar_controls %}{% include "_range_controls.html" %}{% endblock %}
+{% block content %}
+<form id="txn-filters" class="form-anchor" method="get" action="{{ page_path }}"></form>
+{% if msg %}<p class="flash ok" role="status">{{ msg }}</p>{% endif %}
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+
+<section class="card" data-keep-scroll>
+  <div class="card-head">
+    <h2>Matched transfers</h2>
+    <div class="card-totals">
+      <span class="card-total">{{ total_cents | money_whole }}</span>
+      <span class="muted small">{{ pairs | length }} transfer{{ '' if pairs | length == 1 else 's' }}</span>
+    </div>
+  </div>
+  {% if not pairs %}
+  <p class="muted">No matched transfers in this range.</p>
+  {% else %}
+  <div class="table-wrap">
+    {# row-cards (all three tables): on a phone a line of what … amount, then the rest small (app.css) #}
+    <table class="data compact transfer-routes row-cards">
+      <thead><tr><th>From</th><th>To</th><th class="num">Transfers</th><th class="num">Total</th></tr></thead>
+      <tbody>
+      {% for r in routes %}
+        <tr>
+          <td class="rc-main">{{ r.out_account }}{% if r.out_mask %} <span class="muted small">····{{ r.out_mask }}</span>{% endif %}</td>
+          <td class="rc-sub" data-label="to">{{ r.in_account }}{% if r.in_mask %} <span class="muted small">····{{ r.in_mask }}</span>{% endif %}</td>
+          <td class="num rc-sub" data-label="transfers">{{ r.count }}</td>
+          <td class="num rc-amt">{{ r.total_cents | money }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="table-wrap transfer-pairs-wrap">
+    <table class="data compact transfer-pairs row-cards">
+      <thead><tr><th>Date</th><th>From</th><th>To</th><th class="num">Amount</th><th></th></tr></thead>
+      <tbody>
+      {% for p in pairs %}
+        <tr id="pair-{{ p.out.id }}">
+          <td class="rc-sub">{{ p.out.date | date_label }}</td>
+          <td class="rc-main">{{ side(p.out) }}</td>
+          <td class="rc-sub" data-label="to">{{ side(p.into, p.out.date) }}</td>
+          <td class="num rc-amt">{{ p.out.amount_cents | money }}{% if p.manual %}<div class="muted small">Matched by you</div>{% endif %}</td>
+          <td class="rc-tool">
+            <form method="post" action="/transfers/{{ p.out.id }}/unmatch" class="row-actions">
+              {{ keep_range() }}
+              <button type="submit" class="icon-delete" title="Remove match" aria-label="Remove match: {{ p.out.description }} {{ p.out.date | date_label }}">{{ icon("unlink") }}</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h2>Can be matched</h2>
+    <div class="card-totals"><span class="muted small">{{ options | length }}</span></div>
+  </div>
+  {% if not options %}
+  <p class="muted">No unmatched transactions with a possible match in this range.</p>
+  {% else %}
+  <div class="table-wrap">
+    <table class="data compact transfer-options row-cards">
+      <thead><tr><th>Date</th><th>Transaction</th><th class="num">Amount</th><th>Match with</th></tr></thead>
+      <tbody>
+      {% for o in options %}
+        {% set f = "match-" ~ o.txn.id %}
+        <tr id="option-{{ o.txn.id }}">
+          <td class="rc-sub">{{ o.txn.date | date_label }}</td>
+          <td class="rc-main">{{ side(o.txn) }}</td>
+          <td class="num rc-amt {{ 'ok' if o.txn.amount_cents < 0 else '' }}">{{ amount(o.txn.amount_cents) }}</td>
+          <td class="rc-act">
+            <form method="post" action="/transfers/match" id="{{ f }}" class="match-form">
+              {{ keep_range() }}<input type="hidden" name="transaction_id" value="{{ o.txn.id }}">
+              <select name="partner_id" aria-label="Match {{ o.txn.description }} with">
+                {% for p, was in o.partners %}<option value="{{ p.id }}">{{ partner_label(p, was) }}</option>{% endfor %}
+              </select>
+              <button type="submit" class="secondary small">Match</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

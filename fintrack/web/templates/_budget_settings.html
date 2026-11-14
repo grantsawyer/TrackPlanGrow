@@ -1,0 +1,22 @@
+{# Budgets: the main card's settings popup (user's requests 2026-10-28), at the right of its toolbar. How spending is grouped (Fixed / Flexible, Needs /
+   Wants, or Custom: your groups; saved, so the page opens in it next time)
+   and "Group lines without a budget" (remembered in this browser, ui.js). A choice posts at once (data-autosubmit) and
+   comes back to `here`, the same view and month. Clicking outside or Escape closes it (ui.js [data-popover]).
+   `group_label`: the grouping toggle's text for this view. #}
+{% from "_icons.html" import icon %}
+<details class="budget-settings" data-popover>
+  <summary class="button secondary gear-button" aria-label="Budget settings" title="Budget settings">{{ icon("gear") }}</summary>
+  <div class="settings-pop">
+    <form method="post" action="/budgets/framework">
+      <input type="hidden" name="back" value="{{ here }}">
+      <fieldset>
+        <legend>Group spending as</legend>
+        {% for key, (label, _) in frameworks.items() %}
+        <label class="radio-row"><input type="radio" name="framework" value="{{ key }}" data-autosubmit
+          {% if key == framework %}checked{% endif %}> {{ label }}</label>
+        {% endfor %}
+      </fieldset>
+    </form>
+    <label class="radio-row group-row"><input type="checkbox" data-group-toggle> {{ group_label }}</label>
+  </div>
+</details>

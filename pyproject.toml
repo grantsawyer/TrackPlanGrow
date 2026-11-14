@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fintrack"
+version = "0.1.0"
+description = "Local, single-user personal finance tracker backed by Plaid."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.140",
+    "uvicorn[standard]>=0.50",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.20",   # HTML form parsing for FastAPI
+    "python-dotenv>=1.1",
+    "plaid-python>=45",
+    "keyring>=25",
+    "cryptography>=45",
+    "segno>=1.6",                 # QR code of a phone's one-time download link (fintrack remote phone)
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx2>=2.13"]  # httpx2 powers FastAPI's TestClient
+
+[project.scripts]
+fintrack = "fintrack.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["fintrack"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

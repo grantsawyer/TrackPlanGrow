@@ -1,0 +1,19 @@
+{# Shared: a connected investment account's destination rules (contributions.py, migration 0030), on its Balances page
+   since 2026-10-13 (user's request; moved from the old activity page). Needs `destination_rules`. #}
+{# Destination rules (migration 0030; user's request 2026-10-12): a bank transfer that can't be paired with this
+   account's own activity (e.g. before its history starts) counts as money into / out of this account when its raw
+   bank text contains the rule's text. Each rule shows how many such transfers it covers (last 24 months). #}
+<section class="card">
+  <h2>Destination rules</h2>
+  {% for r in destination_rules %}
+    <form method="post" action="/destination-rules/{{ r.id }}/delete" class="inline-form">
+      <input type="hidden" name="account_id" value="{{ account.id }}">
+      <span>Bank transfers containing <strong>{{ r.pattern }}</strong> · {{ r.count }} transfer{{ '' if r.count == 1 else 's' }}</span>
+      <button type="submit" class="link-button small">Remove</button>
+    </form>
+  {% endfor %}
+  <form method="post" action="/accounts/{{ account.id }}/destination-rules" class="inline-form spaced">
+    <input name="pattern" required minlength="3" maxlength="80" placeholder="Text in the bank's raw description" aria-label="Bank transfers containing">
+    <button type="submit" class="secondary">Add rule</button>
+  </form>
+</section>

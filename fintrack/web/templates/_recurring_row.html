@@ -1,0 +1,32 @@
+{# One recurring item row `r`. #}
+{# phones (app.css row-cards): name … amount, then how often · next · account · history, then the buttons #}
+<tr>
+  <td class="rc-main">{{ r.name }}
+    {% if r.source == 'manual' %}<span class="tag">added by you</span>{% endif %}
+    {% if r.type == 'income' %}<span class="kind kind-income">income</span>{% elif r.type == 'transfer' %}<span class="kind">transfer</span>{% endif %}
+  </td>
+  <td class="num rc-amt {{ 'ok' if r.amount_cents < 0 else '' }}">
+    {% if r.amount_cents < 0 %}+{{ (-r.amount_cents) | money }}{% else %}{{ r.amount_cents | money }}{% endif %}
+    {% if r.amount_varies %}<div class="muted small">amount varies</div>{% endif %}
+  </td>
+  <td class="rc-sub">{{ frequency_label(r.frequency) }}{% if r.frequency == 'semimonthly' and r.days_of_month %} <span class="muted small">({{ r.days_of_month }})</span>{% endif %}</td>
+  <td class="nowrap rc-sub" data-label="next">{{ r.next_expected_date | date_label }}
+    {% if r.status == 'confirmed' and r.next_expected_date < today %}<span class="status status-near">⚠ overdue</span>{% endif %}</td>
+  <td class="rc-sub">{{ r.account_name or '—' }}{% if r.account_mask %} <span class="muted">····{{ r.account_mask }}</span>{% endif %}
+    {% if r.category_label %}<div class="muted small">{{ r.category_label }}</div>{% endif %}</td>
+  <td class="muted small rc-sub">{% if r.last_seen_date %}last {{ r.last_seen_date | date_label }}{% if r.occurrences %} · {{ r.occurrences }}×{% endif %}{% endif %}</td>
+  <td class="nowrap rc-act">
+    <form method="post" action="/recurring/{{ r.id }}/status" class="inline-form">
+      {% if r.status == 'detected' %}
+        {# Confirm opens the item's window, to check what matches and set what to do (user's request 2026-11-03) #}
+        <a class="button small" href="/recurring/{{ r.id }}/edit">Confirm</a>
+        <button type="submit" name="status" value="dismissed" class="link-button small">Dismiss</button>
+      {% elif r.status == 'confirmed' %}
+        <button type="submit" name="status" value="{{ 'remove' if r.source == 'manual' else 'dismissed' }}" class="link-button small">Remove</button>
+      {% else %}
+        <button type="submit" name="status" value="detected" class="link-button small">Restore</button>
+      {% endif %}
+      {% if r.status == 'confirmed' %}<a class="small muted" href="/recurring/{{ r.id }}/edit">Edit</a>{% endif %}
+    </form>
+  </td>
+</tr>

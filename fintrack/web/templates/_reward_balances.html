@@ -1,0 +1,61 @@
+{# A credit card's rewards balance as of dates you enter (user's request 2026-10-26; rewards.balances, migration 0044):
+   the latest in the card head, every one editable in place (date, amount; Delete via formaction, so no nested forms),
+   and a form to add one. A new balance is in the card's rewards unit (Credit cards), or the one you pick. #}
+{% from "_icons.html" import icon %}
+{% macro amount_value(unit, n) -%}{{ '%.2f' | format(n / 100) if unit == 'cash' else '{:,}'.format(n) }}{%- endmacro %}
+<section class="card reward-balances" id="reward-balances" data-keep-scroll>
+  <div class="card-head">
+    <h2>Rewards balance</h2>
+    {# now = the latest balance you entered + the rewards of the card's transactions after it and bonus points, less
+       redemptions since (2026-11-03; rewards.current_balance);
+       without rates set up (or in another unit), the latest balance as you entered it #}
+    {% if reward_current %}{% set cur = reward_current %}
+    <div class="card-totals">
+      {% macro n(v) %}{{ '{:,}'.format(v) if cur.latest.unit != 'cash' else v | money }}{% endmacro %}
+      <span class="card-total" title="Your {{ cur.latest.as_of | date_label }} balance + rewards and bonuses since − redemptions since">{{ reward_label(cur.latest.unit, cur.total) }}</span>
+      <span class="muted small">{{ n(cur.latest.amount) }} on {{ cur.latest.as_of | date_label }} + {{ n(cur.earned_since) }} earned{% if cur.redeemed_since %} − {{ n(cur.redeemed_since) }} redeemed{% endif %}</span>
+    </div>
+    {% elif reward_balances %}{% set latest = reward_balances[0] %}
+    <div class="card-totals">
+      <span class="card-total">{{ reward_label(latest.unit, latest.amount) }}</span>
+      <span class="muted small">as of {{ latest.as_of | date_label }}</span>
+    </div>
+    {% endif %}
+  </div>
+  {% if reward_balances %}
+  <div class="table-wrap">
+    <table class="data compact">
+      <thead><tr><th>As of</th><th>Balance</th><th></th></tr></thead>
+      <tbody>
+      {% for b in reward_balances %}
+        {% set f = "balance-" ~ b.id %}
+        <tr>
+          <td><input type="date" name="as_of" value="{{ b.as_of }}" max="{{ today_iso }}" form="{{ f }}" aria-label="As of" required></td>
+          <td><span class="balance-amount"><input name="amount" value="{{ amount_value(b.unit, b.amount) }}" inputmode="{{ 'decimal' if b.unit == 'cash' else 'numeric' }}"
+                     form="{{ f }}" aria-label="Balance ({{ reward_units[b.unit] | lower }})" required>
+              <span class="muted small">{{ '$ cash back' if b.unit == 'cash' else b.unit }}</span></span></td>
+          <td>
+            <form method="post" action="/accounts/{{ account.id }}/reward-balances/{{ b.id }}" id="{{ f }}" class="row-actions">
+              <input type="hidden" name="unit" value="{{ b.unit }}">
+              <button type="submit" class="secondary small">Save</button>
+              <button type="submit" class="icon-delete" formaction="/accounts/{{ account.id }}/reward-balances/{{ b.id }}/delete" formnovalidate
+                      title="Delete balance" aria-label="Delete the {{ b.as_of | date_label }} balance">{{ icon("trash") }}</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  <form method="post" action="/accounts/{{ account.id }}/reward-balances" class="inline-form">
+    <label>As of <input type="date" name="as_of" value="{{ today_iso }}" max="{{ today_iso }}" required></label>
+    <label>Balance <input name="amount" inputmode="decimal" placeholder="{{ '25.00' if reward_unit == 'cash' else '50,000' }}" required></label>
+    {% if reward_unit %}
+    <input type="hidden" name="unit" value="{{ reward_unit }}"><span class="muted small">{{ '$ cash back' if reward_unit == 'cash' else reward_unit }}</span>
+    {% else %}
+    <select name="unit" aria-label="Unit">{% for key, label in reward_units.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select>
+    {% endif %}
+    <button type="submit">Add</button>
+  </form>
+</section>

@@ -1,0 +1,237 @@
+{# The Import page's preview (web/imports._preview), inside the import form: every field here posts with the next change
+   and with Import. `previewed` ties the answers to this file and account. #}
+<input type="hidden" name="previewed" value="{{ previewed }}">
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+
+{% if grid %}
+{# what the file holds (phase 5): transactions, investment activity or holdings; your choice when the guess is wrong #}
+<div class="import-questions">
+  <label>File holds
+    <select name="kind">
+      {% if not kind %}<option value="" selected disabled>Choose…</option>{% endif %}
+      {% for k, label in kinds.items() %}<option value="{{ k }}" {% if k == kind %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+  </label>
+</div>
+<input type="hidden" name="cols" value="{{ grid.width }}">
+<div class="table-wrap import-grid">
+  <table class="data compact">
+    <thead>
+      <tr>
+        {% for i in range(grid.width) %}
+        <th><select name="col_{{ i }}" aria-label="Column {{ i + 1 }}{% if grid.header and grid.header[i] %}: {{ grid.header[i] }}{% endif %}">
+          {% for role, label in roles %}<option value="{{ role }}" {% if grid.roles.get(i, '') == role %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select></th>
+        {% endfor %}
+      </tr>
+      {% if grid.header %}<tr class="import-header">{% for h in grid.header %}<th>{{ h }}</th>{% endfor %}</tr>{% endif %}
+    </thead>
+    <tbody>
+      {% for r in grid.rows %}<tr>{% for c in r %}<td>{{ c }}</td>{% endfor %}</tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if plan %}
+{% set d = plan.detection %}
+<div class="import-questions">
+  {% if date_family in ('mdy', 'dmy') %}
+  <label class="{{ 'import-ask' if 'date_order' in d.questions }}">Dates
+    <select name="dates">
+      {% if not date_order %}<option value="" selected>Choose…</option>{% endif %}
+      <option value="mdy" {% if date_order == 'mdy' %}selected{% endif %}>Month first</option>
+      <option value="dmy" {% if date_order == 'dmy' %}selected{% endif %}>Day first</option>
+    </select>
+  </label>
+  {% endif %}
+  {% if signed %}
+  <label class="{{ 'import-ask' if 'sign' in d.questions }}">Money out is
+    <select name="money_out">
+      {% if not sign %}<option value="" selected>Choose…</option>{% endif %}
+      <option value="1" {% if sign == '1' %}selected{% endif %}>positive amounts</option>
+      <option value="-1" {% if sign == '-1' %}selected{% endif %}>negative amounts</option>
+    </select>
+  </label>
+  {% endif %}
+  {% if plan.kind == 'positions' %}
+  <label class="{{ 'import-ask' if 'as_of' in plan.needs }}">As of
+    <input type="date" name="as_of" value="{{ plan.as_of or '' }}" max="{{ today_iso }}" required>
+  </label>
+  {% endif %}
+  {% if plan.cards %}
+  {# which card is the account's own; the others are authorized users' (authorized_users.py; 2026-11-13) #}
+  <label class="{{ 'import-ask' if plan.primary_asked }}">Primary card
+    <select name="primary_card">
+      {% if plan.primary_asked %}<option value="" selected disabled>Choose…</option>{% endif %}
+      {% for card, n in plan.cards.most_common() %}<option value="{{ card }}" {% if card == plan.primary_card %}selected{% endif %}>····{{ card }} · {{ n }} row{{ '' if n == 1 else 's' }}</option>{% endfor %}
+      <option value="" {% if not plan.primary_asked and not plan.primary_card %}selected{% endif %}>None of these</option>
+    </select>
+  </label>
+  {% endif %}
+</div>
+
+{% if plan.overlap %}
+{% set o = plan.overlap %}
+<fieldset class="import-overlap{{ ' import-ask' if 'overlap' in plan.needs }}">
+  <legend>The file ({{ o.file_from | date_label }} – {{ o.file_to | date_label }}) overlaps the account's transactions
+    ({% for start, end in o.have %}{{ start | date_label }}{% if end is none %} on{% elif end != start %} – {{ end | date_label }}{% endif %}{{ ', ' if not loop.last }}{% endfor %})</legend>
+  <label class="radio-row"><input type="radio" name="overlap" value="outside" {% if overlap_choice == 'outside' %}checked{% endif %}>
+    Only dates the account doesn't have <span class="muted small">{{ o.outside }} row{{ '' if o.outside == 1 else 's' }}{{ ' · last time' if last_choice == 'outside' }}</span></label>
+  <label class="radio-row"><input type="radio" name="overlap" value="skip" {% if overlap_choice == 'skip' %}checked{% endif %}>
+    Every row except likely duplicates <span class="muted small">{{ o.skip }} row{{ '' if o.skip == 1 else 's' }}{{ ' · last time' if last_choice == 'skip' }}</span></label>
+  <label class="radio-row"><input type="radio" name="overlap" value="review" {% if overlap_choice == 'review' %}checked{% endif %}>
+    Every row; I'll pick from the {{ o.duplicates }} likely duplicate{{ '' if o.duplicates == 1 else 's' }}{% if last_choice == 'review' %} <span class="muted small">last time</span>{% endif %}</label>
+</fieldset>
+{% endif %}
+
+{% if bank %}
+<details class="import-categories"{% if plan.unmapped %} open{% endif %}>
+  <summary>Bank categories <span class="muted small">{{ bank | length }}{% if plan.unmapped %} · {{ plan.unmapped | length }} not matched{% endif %}</span></summary>
+  <div class="import-category-list">
+    {% for b in bank %}
+    <label><span>{{ b.name }} <span class="muted small">{{ b.count }}</span></span>
+      <input type="hidden" name="catname_{{ b.n }}" value="{{ b.name }}">
+      <select name="cat_{{ b.n }}">
+        <option value="">Uncategorized</option>
+        {% for heading, group in category_list | by_kind %}<optgroup label="{{ heading }}">{% for c in group %}<option value="{{ c.key }}" {% if c.key == b.key %}selected{% endif %}>{{ c | category_option }}</option>{% endfor %}</optgroup>{% endfor %}
+      </select>
+    </label>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+
+{# an activity file's action words, each with what it does (kept for this account's files with these columns) #}
+{% if actions %}
+<details class="import-categories" open>
+  <summary>Actions <span class="muted small">{{ actions | length }}</span></summary>
+  <div class="import-category-list">
+    {% for a in actions %}
+    <label><span title="{{ a.example }}">{{ a.example[:40] }} <span class="muted small">{{ a.count }}</span></span>
+      <input type="hidden" name="actname_{{ a.n }}" value="{{ a.key }}">
+      <select name="act_{{ a.n }}">
+        {% for k, label in action_kinds.items() %}<option value="{{ k }}" {% if k == a.kind %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+{# a manual account: the line each fund goes to; another ticker's line (a proxy) or a dollars line = by dollars #}
+{% if funds %}
+<details class="import-categories" open>
+  <summary>Holdings <span class="muted small">{{ funds | length }}</span></summary>
+  <div class="import-category-list">
+    {% for f in funds %}
+    <label><span title="{{ f.description }}">{{ f.symbol }} <span class="muted small">{{ f.description[:28] }}</span></span>
+      <input type="hidden" name="holdname_{{ f.n }}" value="{{ f.symbol }}">
+      <select name="hold_{{ f.n }}">
+        <option value="new" {% if f.chosen == 'new' %}selected{% endif %}>New line</option>
+        {% for l in fund_lines %}<option value="{{ l.id }}" {% if f.chosen == l.id | string %}selected{% endif %}>{{ l.ticker or l.name }}{% if l.ticker %} · {{ l.name[:24] }}{% endif %}{% if l.ticker != f.symbol %} · by dollars{% endif %}</option>{% endfor %}
+      </select>
+    </label>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+{# reinvestments the file has no dividend for: a dividend added for each (the income side; user's decision 2026-11-13) #}
+{% if plan.unpaired %}
+<label class="radio-row import-add-dividends">
+  <input type="hidden" name="add_dividends_shown" value="1">
+  <input type="checkbox" name="add_dividends" value="1" {% if plan.add_dividends %}checked{% endif %}>
+  Add a dividend for each of the {{ plan.unpaired }} reinvestment{{ '' if plan.unpaired == 1 else 's' }} without one in the file
+</label>
+{% endif %}
+{% for problem in plan.problems %}<p class="flash bad">{{ problem }}</p>{% endfor %}
+
+<div class="import-summary">
+  <div>
+    <strong>{{ new | length }} to add</strong>
+    {% if plan.kind == 'positions' %}
+    {% if new %}<span class="muted small">{{ total_value | money }} as of {{ plan.as_of | date_label }}</span>{% endif %}
+    {% if plan.zeroed %}<span class="muted small">· set to 0 (not on the statement): {{ plan.zeroed | join(', ') }}</span>{% endif %}
+    {% elif plan.kind == 'activity' %}
+    {% if new %}<span class="muted small">{{ (new | map(attribute='row.posted') | min) | date_label }} – {{ (new | map(attribute='row.posted') | max) | date_label }}</span>{% endif %}
+    {% elif new %}<span class="muted small">{{ (new | map(attribute='row.posted') | min) | date_label }} – {{ (new | map(attribute='row.posted') | max) | date_label }} · out {{ money_out | money }} · in {{ money_in | money }}</span>{% endif %}
+    {% if plan.count('already') %}<span class="muted small">· {{ plan.count('already') }} imported before</span>{% endif %}
+    {% if plan.skipped %}<span class="muted small">· {{ plan.skipped | length }} not read</span>{% endif %}
+  </div>
+  <button type="submit" {% if plan.needs or not (new or plan.cards_missing or plan.primary_change or plan.zeroed) %}disabled{% endif %}>Import</button>
+</div>
+
+{% if plan.skipped %}
+<details class="import-skipped">
+  <summary class="muted small">Rows not read</summary>
+  <ul class="small">{% for line, why in plan.skipped[:50] %}<li>Row {{ line }}: {{ why }}</li>{% endfor %}</ul>
+</details>
+{% endif %}
+
+{% if listed and plan.kind == 'positions' %}
+<div class="table-wrap">
+  <table class="data compact import-rows row-cards">
+    <thead><tr><th>Symbol</th><th>Description</th><th class="num">Quantity</th><th class="num">Price</th><th class="num">Value</th><th></th></tr></thead>
+    <tbody>
+    {% for p in listed[:list_rows] %}
+      <tr class="{{ 'muted' if not p.take }}">
+        <td class="rc-main">{{ p.line or 'Cash' }}</td>
+        <td class="rc-sub">{{ p.row.description }}</td>
+        <td class="num rc-sub">{{ p.row.quantity if p.row.quantity is not none else '' }}</td>
+        <td class="num rc-sub">{{ p.row.price if p.row.price is not none else '' }}</td>
+        <td class="num rc-amt">{{ p.row.value_cents | money if p.row.value_cents is not none else '' }}</td>
+        <td class="rc-sub small">{% if p.status == 'yours' %}Kept: you entered {{ plan.as_of | date_label }}{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% elif listed and plan.kind == 'activity' %}
+<div class="table-wrap">
+  <table class="data compact import-rows row-cards">
+    <thead><tr><th>Date</th><th>Action</th><th>Symbol</th><th>Description</th><th class="num">Quantity</th><th class="num">Amount</th><th></th></tr></thead>
+    <tbody>
+    {% for p in listed[:list_rows] %}
+      <tr class="{{ 'muted' if not p.take }}">
+        <td class="rc-sub">{{ p.row.posted | date_label }}</td>
+        <td class="rc-main">{{ action_kinds[p.kind] }}{% if p.added %} <span class="muted small">added</span>{% endif %}</td>
+        <td class="rc-sub">{{ p.row.symbol }}</td>
+        <td class="rc-sub">{{ p.row.description }}</td>
+        <td class="num rc-sub">{{ p.effect.shares if p.effect.shares is not none else '' }}</td>
+        <td class="num rc-amt">{% if p.effect.cash %}{{ '+' if p.effect.cash > 0 }}{{ p.effect.cash | abs | money }}{% elif p.row.cash_cents %}{{ p.row.cash_cents | abs | money }}{% endif %}</td>
+        <td class="rc-sub small">
+          {% if p.status == 'duplicate' and plan.choice == 'review' %}
+          <label class="radio-row"><input type="checkbox" name="take" value="{{ p.row.line }}" {% if p.take %}checked{% endif %}> Add</label>
+          {% endif %}
+          {% if p.status in status_labels %}{{ status_labels[p.status] }}{% if p.duplicate_of %}: {{ p.duplicate_of.date | date_label }} {{ p.duplicate_of.name }}{% endif %}{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if listed | length > list_rows %}<p class="muted small">and {{ listed | length - list_rows }} more</p>{% endif %}
+</div>
+{% elif listed %}
+<div class="table-wrap">
+  <table class="data compact import-rows row-cards">
+    <thead><tr><th>Date</th><th>Description</th><th>Category</th><th class="num">Amount</th><th></th></tr></thead>
+    <tbody>
+    {% for p in listed[:list_rows] %}
+      <tr class="{{ 'muted' if not p.take }}">
+        <td class="rc-sub">{{ p.row.posted | date_label }}</td>
+        <td class="rc-main">{{ p.row.description }}</td>
+        <td class="rc-sub">{{ p.category_label }}</td>
+        <td class="num rc-amt">{% if p.row.amount_cents < 0 %}+{{ (-p.row.amount_cents) | money }}{% else %}{{ p.row.amount_cents | money }}{% endif %}</td>
+        <td class="rc-sub small">
+          {% if p.status == 'duplicate' and plan.choice == 'review' %}
+          <label class="radio-row"><input type="checkbox" name="take" value="{{ p.row.line }}" {% if p.take %}checked{% endif %}> Add</label>
+          {% endif %}
+          {% if p.status in status_labels %}{{ status_labels[p.status] }}{% if p.duplicate_of %}: {{ p.duplicate_of.date | date_label }} {{ p.duplicate_of.name }}{% endif %}{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if listed | length > list_rows %}<p class="muted small">and {{ listed | length - list_rows }} more</p>{% endif %}
+</div>
+{% endif %}
+{% endif %}

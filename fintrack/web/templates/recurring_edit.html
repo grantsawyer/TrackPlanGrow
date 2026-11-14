@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{# Edit a recurring item, or confirm a detected one (its row's Confirm opens this; user's request 2026-11-03). #}
+{% block title %}{{ 'Confirm' if item.status == 'detected' else 'Edit' }} {{ item.name }} · Track Plan Grow{% endblock %}
+{% block content %}
+<div class="page-head">
+  <a class="small muted" href="/recurring">← Recurring</a>
+</div>
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+{% with part = "card" %}{% include "_recurring_form.html" %}{% endwith %}
+{% endblock %}

@@ -1,0 +1,342 @@
+{% extends "base.html" %}
+{% block title %}{{ account.name }} · Track Plan Grow{% endblock %}
+{# One account's page (user's request 2026-10-13; the only page per account since 2026-10-15, when the activity page
+   and /manual/{id} were folded in): a card named by the source and the account, then its Holdings (investment
+   accounts), its Transactions (the Transactions page's row format without the account column; rows edit as on
+   Transactions, an investment account's activity included; web/accounts.account_transactions) or a manual
+   account's History, its rules, and for a manual account Manage (archive, delete). #}
+{% block content %}
+<div class="page-head"><a href="/accounts">← Accounts</a></div>
+{% if msg %}<p class="flash ok" role="status">{{ msg }}</p>{% endif %}
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+{# Account card (user's requests 2026-10-13; reorganised the same day to read at a glance): a header (logo, "source ·
+   account", number; the balance and when it was updated on the right), then the account's Details and, for a credit
+   card, its Statement side by side (status = icon + label + colour). Details holds the fields you edit in place (name,
+   institution, type, bills paid from; user's requests 2026-10-13: no "From the bank", no Save buttons). #}
+<section class="card account-detail">
+  <div class="acct-head">
+    <div class="acct-id">
+      {%- if logo %}<img class="acct-logo" src="/logos/{{ logo }}" alt="" width="36" height="36">
+      {%- else %}<span class="acct-logo merchant-initial" aria-hidden="true">{{ (source if source != 'Manual' else account.name)[:1] | upper }}</span>{% endif %}
+      <div>
+        <h2>{{ source }} · {{ account.name }}</h2>
+        {% if account.mask %}<div class="muted small">Account ····{{ account.mask }}</div>{% endif %}
+      </div>
+    </div>
+    <div class="acct-balance">
+      <div class="acct-balance-value">{{ account.current_balance_cents | money if account.current_balance_cents is not none else "—" }}</div>
+      <div class="muted small">{% if account.is_manual %}<span class="manual-tag">Manual</span>{% if value_as_of and not takes_transactions %} as of {{ value_as_of | date_label }}{% endif %}{% if takes_transactions or account.type == 'investment' %} · <a href="/import?account={{ account.id }}">Import a file</a>{% endif %}{% if account.is_hidden %} <span class="tag">archived</span>{% endif %}{% else %}Updated {{ account.last_synced_at | localtime }} · <a href="/import?account={{ account.id }}">Import a file</a>{% endif %}</div>
+    </div>
+  </div>
+
+  <div class="acct-grid{{ ' with-statement' if card }}">
+    <div>
+      <h3 class="acct-section">Details</h3>
+      {# Name, Institution (manual) and Type edit in place (user's request 2026-10-13): no Save button; a change saves
+         (data-autosubmit -> requestSubmit, which runs the fields' own rules first: an invalid value shows the
+         browser's message and isn't sent; the server checks the same rules and refuses bad input too). #}
+      <dl class="details">
+        <dt><label for="acct-name-{{ account.id }}">Name</label></dt>
+        <dd>
+          <form method="post" action="/accounts/{{ account.id }}/name" class="inline-form">
+            <input id="acct-name-{{ account.id }}" name="name" value="{{ account.name }}" maxlength="60" data-autosubmit
+                   {% if account.is_manual %}required{% else %}placeholder="Blank = the bank's name"{% endif %}>
+            <noscript><button type="submit" class="secondary">Save</button></noscript>
+          </form>
+        </dd>
+        {% if account.is_manual and takes_transactions %}
+        {# its last 4 (2026-11-13): a card's rows from another card are an authorized user's (authorized_users.py) #}
+        <dt><label for="acct-mask-{{ account.id }}">Last 4</label></dt>
+        <dd>
+          <form method="post" action="/accounts/{{ account.id }}/mask" class="inline-form">
+            <input id="acct-mask-{{ account.id }}" name="mask" value="{{ account.mask or '' }}" maxlength="4" size="5"
+                   pattern="[0-9A-Za-z]{2,4}" inputmode="numeric" autocomplete="off" data-autosubmit>
+            <noscript><button type="submit" class="secondary">Save</button></noscript>
+          </form>
+        </dd>
+        {% endif %}
+        {% if account.is_manual %}
+        <dt><label for="acct-inst-{{ account.id }}">Institution</label></dt>
+        <dd>
+          <form method="post" action="/accounts/{{ account.id }}/institution" class="inline-form">
+            <input id="acct-inst-{{ account.id }}" name="institution" value="{{ account.manual_institution or '' }}" maxlength="60"
+                   placeholder="e.g. Acme Investments" data-autosubmit>
+            <noscript><button type="submit" class="secondary">Save</button></noscript>
+          </form>
+        </dd>
+        {% endif %}
+        <dt><label for="acct-type-{{ account.id }}">Type</label> <a class="small muted" href="/account-types">Edit types</a></dt>
+        <dd>
+          <form method="post" action="/accounts/{{ account.id }}/type" class="inline-form">
+            <select id="acct-type-{{ account.id }}" name="node" data-autosubmit>
+              <option value="">Automatic{% if auto_path %} · {{ auto_path }}{% endif %}</option>
+              {% for t in types %}
+              <optgroup label="{{ t.name }} ({{ kind_labels[t.kind] }})">
+                <option value="{{ t.id }}" {% if account.type_node_id == t.id %}selected{% endif %}>{{ t.name }}</option>
+                {% for c in t.children %}<option value="{{ c.id }}" {% if account.type_node_id == c.id %}selected{% endif %}>{{ t.name }} › {{ c.name }}</option>{% endfor %}
+              </optgroup>
+              {% endfor %}
+            </select>
+            <noscript><button type="submit" class="secondary">Save</button></noscript>
+          </form>
+        </dd>
+        {% if account.is_manual and not account.type_kind %}
+        {# A manual account's kind, while no type of yours sets it (from /manual/{id}, 2026-10-15) #}
+        <dt><label for="acct-kind-{{ account.id }}">Kind</label></dt>
+        <dd>
+          <form method="post" action="/accounts/{{ account.id }}/kind" class="inline-form">
+            <select id="acct-kind-{{ account.id }}" name="kind" data-autosubmit>
+              {% for key, k in kinds.items() %}<option value="{{ key }}" {% if key == kind %}selected{% endif %}>{{ k.label }}</option>{% endfor %}
+            </select>
+            <noscript><button type="submit" class="secondary">Save</button></noscript>
+          </form>
+        </dd>
+        {% endif %}
+        {% if card %}
+        <dt><label for="pay-from-{{ account.id }}">Bills paid from</label></dt>
+        <dd>
+          <form method="post" action="/accounts/{{ account.id }}/pay-from" class="inline-form">
+            <select id="pay-from-{{ account.id }}" name="pay_from" data-autosubmit>
+              <option value="auto" {% if card.payer.mode == 'auto' %}selected{% endif %}>Automatic{% if card.auto %} · {{ card.auto.name }}{% else %} (none){% endif %}</option>
+              {% for o in card.options %}<option value="{{ o.id }}" {% if card.payer.mode == 'chosen' and card.payer.pay_from == o.id %}selected{% endif %}>{{ o.name }}{% if o.mask %} ····{{ o.mask }}{% endif %}</option>{% endfor %}
+              <option value="none" {% if card.payer.mode == 'none' %}selected{% endif %}>Don't forecast</option>
+            </select>
+            <noscript><button type="submit" class="secondary">Save</button></noscript>
+          </form>
+        </dd>
+        {% endif %}
+      </dl>
+    </div>
+    {% if card %}
+    {% set st, raw = card.statement, card.raw %}
+    <div class="acct-statement">
+      <h3 class="acct-section">Statement</h3>
+      {# a manual card (user's decision 2026-11-14): you set the days it closes and is due; each statement's balance is
+         what it owed at the end of its closing date, which you can change (cards.refresh_manual_statements) #}
+      {% if account.is_manual %}
+      {% set cs = card.settings %}
+      <form method="post" action="/accounts/{{ account.id }}/statement-settings" class="inline-form statement-days">
+        <label>Closes on day <input name="closing_day" value="{{ cs.closing_day if cs else '' }}" inputmode="numeric" size="3" maxlength="2" pattern="[0-9]{1,2}" required data-autosubmit></label>
+        <label>Due on day <input name="due_day" value="{{ cs.due_day if cs else '' }}" inputmode="numeric" size="3" maxlength="2" pattern="[0-9]{1,2}" required data-autosubmit></label>
+        <label>Minimum <input name="minimum" value="{{ '%.2f' | format(cs.minimum_cents / 100) if cs and cs.minimum_cents is not none else '' }}" inputmode="decimal" size="8" placeholder="optional" data-autosubmit></label>
+        <noscript><button type="submit" class="secondary">Save</button></noscript>
+      </form>
+      {% endif %}
+      {% if raw and raw.statement_balance_cents is not none %}
+      <dl class="details">
+        {% if account.is_manual %}
+        <dt><label for="stmt-date-{{ account.id }}">Closed</label></dt>
+        <dd>
+          <form method="post" action="/accounts/{{ account.id }}/statement-date" class="inline-form">
+            <input id="stmt-date-{{ account.id }}" type="date" name="statement_date" value="{{ raw.statement_date }}" max="{{ today_iso }}" data-autosubmit>
+            <noscript><button type="submit" class="secondary">Save</button></noscript>
+          </form>
+        </dd>
+        <dt>Balance</dt><dd>{{ raw.statement_balance_cents | money }}</dd>
+        {% else %}
+        <dt>Balance</dt><dd>{{ raw.statement_balance_cents | money }}{% if raw.statement_date %} <span class="muted small">issued {{ raw.statement_date | date_label }}</span>{% endif %}</dd>
+        {% endif %}
+        <dt>Due</dt><dd>{% if raw.due_date %}{{ raw.due_date | date_label }}{% if card.days_to_due is not none and card.days_to_due >= 0 %} <span class="muted small">· in {{ card.days_to_due }} day{{ '' if card.days_to_due == 1 else 's' }}</span>{% endif %}{% else %}—{% endif %}</dd>
+        {% if raw.minimum_payment_cents and raw.minimum_payment_cents > 0 %}<dt>Minimum</dt><dd>{{ raw.minimum_payment_cents | money }}</dd>{% endif %}
+        <dt>Status</dt>
+        <dd>
+          {%- if not st or not st.statement_cents %}<span class="muted">Nothing to pay</span>
+          {%- elif st.owed_cents == 0 %}<span class="status-text good">✓ Paid</span>
+          {%- elif st.overdue %}<span class="status-text critical">⚠ Overdue</span> · {{ st.owed_cents | money }} owed
+          {%- else %}<span class="status-text warning">◷ Due</span> · {{ st.owed_cents | money }} owed{% if st.paid_cents %} <span class="muted small">({{ st.paid_cents | money }} paid)</span>{% endif %}{% endif %}
+        </dd>
+      </dl>
+      {% else %}
+      <p class="muted small">{{ 'Set the days it closes and is due to see its statement.' if account.is_manual else 'No statement from the bank yet.' }}</p>
+      {% endif %}
+      {# average monthly spend and the next estimated statement payment (cards.estimates; user's request 2026-10-23) #}
+      {% set est = card.estimate %}
+      {% if est and est.monthly_cents is not none %}
+      <dl class="details">
+        <dt>Average monthly spend</dt><dd>{{ est.monthly_cents | money }} <span class="muted small">· last {{ est.months }} month{{ '' if est.months == 1 else 's' }}</span></dd>
+        {% if est.first_due and est.monthly_cents %}
+        <dt>Next estimated payment</dt><dd>{{ est.monthly_cents | money }} on {{ est.first_due | date_label }}{% if est.pay_from is none %} <span class="muted small">· not forecast: no paying account</span>{% endif %}</dd>
+        {% endif %}
+      </dl>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+</section>
+
+{# Its cards (authorized users, user's request 2026-10-29; authorized_users.card_summaries): the primary card and each
+   authorized user's, with how often each is used and what it spent over the last 365 days; each opens its
+   transactions below (?card=). Only for an account with an authorized user's card. #}
+{% if card_summaries %}
+<section class="card">
+  <h2>Cards</h2>
+  <div class="table-wrap">
+    <table class="data compact">
+      <thead><tr><th>Card</th><th class="num">Transactions</th><th class="num">Spent, 365 days</th><th>Last used</th></tr></thead>
+      <tbody>
+      {% for c in card_summaries %}
+      <tr>
+        <td><a href="/accounts/{{ account.id }}?card={{ c.card.value | urlencode }}#transactions">{{ 'AU' if c.card.au else 'Primary' }}{% if c.card.last4 %} ····{{ c.card.last4 }}{% endif %}</a></td>
+        <td class="num">{{ '{:,}'.format(c.count) }}</td>
+        <td class="num">{{ c.spent_cents | money }}</td>
+        <td>{{ c.last_used | date_label }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% if card %}{% include "_reward_balances.html" %}{% if reward_unit %}{% include "_reward_bonus_points.html" %}{% endif %}{% endif %}
+{% if show_holdings %}{% include "_holdings_card.html" %}{% endif %}
+
+{# A manual account: its History (and adjustments) instead of Transactions (user's request 2026-10-13: moved here from
+   /manual/{id}; a money-lent account's History already lists its linked transfers); a manual bank account, card or
+   loan has both (2026-11-13) #}
+{% if removed %}{% with review_url = "/accounts/" ~ account.id %}{% include "_removed_review.html" %}{% endwith %}{% endif %}
+
+{% if show_manual_history %}{% include "_manual_history.html" %}{% endif %}
+{% if not show_manual_history or shows_activity %}
+<section class="card" id="transactions">
+  <div class="card-head">
+    <h2>Transactions</h2>
+    {# a manual investment account's activity, entered like a connected one's comes (ledger.py; docs/parity-plan.md) #}
+    {% if account.is_manual and account.type == 'investment' %}
+    <details class="add-event add-activity">
+      <summary class="button secondary">Add activity</summary>
+      <form method="post" action="/accounts/{{ account.id }}/activity" class="inline-form">
+        <input type="date" name="date" value="{{ today }}" max="{{ today }}" required aria-label="Date">
+        <select name="kind" aria-label="Kind">{% for key, label in activity_kinds.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select>
+        <select name="holding" aria-label="Holding">
+          <option value="cash">Cash</option>
+          {% for p in positions if p.ticker or p.name|lower != 'cash' %}<option value="{{ p.id }}">{{ p.ticker or p.name }}{% if p.ticker and p.name != p.ticker %} · {{ p.name[:24] }}{% endif %}</option>{% endfor %}
+          <option value="new">New ticker…</option>
+        </select>
+        <input name="new_ticker" maxlength="10" size="8" placeholder="New ticker" aria-label="New ticker">
+        <input name="quantity" inputmode="decimal" size="8" placeholder="Shares" aria-label="Shares (blank: dollars)">
+        <input name="price" inputmode="decimal" size="8" placeholder="Price" aria-label="Price per share">
+        <input name="amount" inputmode="decimal" size="9" placeholder="Amount" aria-label="Amount">
+        <input name="description" maxlength="120" placeholder="Description" aria-label="Description">
+        <button type="submit">Add</button>
+      </form>
+    </details>
+    {% endif %}
+  </div>
+  {# Filters (user's request 2026-10-29; web/accounts.account_transactions): the Transactions page's search, this
+     account's cards (when it has an authorized user's), category and From / To. Plain GET form; with HTMX only the list
+     below refreshes as you type or choose, so the search box keeps its focus. #}
+  {% if txn_filters is defined %}
+  <form id="acct-filters" class="filters acct-filters" method="get" action="/accounts/{{ account.id }}"
+        hx-get="/accounts/{{ account.id }}" hx-target="#acct-txns" hx-select="#acct-txns" hx-swap="outerHTML"
+        hx-push-url="true" hx-trigger="change, keyup changed delay:300ms from:#acct-q, submit">
+    <input id="acct-q" type="search" name="q" value="{{ txn_filters.q }}" placeholder="Search text or amount (42.50, >100)" aria-label="Search">
+    {% if account_cards %}
+    <select name="card" aria-label="Card">
+      <option value="">All cards</option>
+      {% for c in account_cards %}<option value="{{ c.value }}" {% if txn_filters.card == c.value %}selected{% endif %}>{{ 'AU' if c.au else 'Primary' }}{% if c.last4 %} ····{{ c.last4 }}{% endif %}</option>{% endfor %}
+    </select>
+    {% endif %}
+    <select name="category" aria-label="Category">
+      <option value="">All categories</option>
+      {% for heading, group in categories | by_kind %}<optgroup label="{{ heading }}">{% for c in group %}<option value="{{ c.key }}" {% if txn_filters.category == c.key %}selected{% endif %}>{{ c | category_option }}</option>{% endfor %}</optgroup>{% endfor %}
+    </select>
+    <label class="small muted">From <input type="date" name="from" value="{{ txn_filters['from'] }}" aria-label="From date"></label>
+    <label class="small muted">To <input type="date" name="to" value="{{ txn_filters.to }}" aria-label="To date"></label>
+    {% if filtered %}<a class="small" href="/accounts/{{ account.id }}#transactions">Clear</a>{% endif %}
+    <noscript><button type="submit" class="secondary">Go</button></noscript>
+  </form>
+  {% endif %}
+  <div id="acct-txns">
+  {# the current sort, kept when a filter changes: inside the part that refreshes, tied to the form by its id #}
+  {% if sort_url is defined and not date_order %}
+  <input type="hidden" name="sort" value="{{ sort }}" form="acct-filters">
+  {% if sort_dir == 'asc' %}<input type="hidden" name="dir" value="asc" form="acct-filters">{% endif %}
+  {% endif %}
+  {% if transactions %}
+  {# phones: grouped under a heading per date while sorted by date, like the Transactions list (app.css) #}
+  {% set by_date = sort_url is not defined or sort == 'date' %}
+  <div class="table-wrap"{{ ' data-by-date' if by_date }}>
+    <table class="data txns">
+      <thead>
+        <tr>
+          {% if sort_url is defined %}
+          {# Headings sort the whole filtered list on the server (user's request 2026-10-29; before the newest-200 cut);
+             again = reverse. With HTMX only the list refreshes; the rewards column isn't sortable (worked out per row). #}
+          {% for col, label, cls in [('date', 'Date', 'date-col'), ('description', 'Description', ''), ('category', 'Category', '')]
+                                    + ([('card', 'Card', '')] if card_col is defined and card_col else []) + [('amount', 'Amount', 'num amount-col')] %}
+          <th class="{{ cls }}" aria-sort="{{ ('ascending' if sort_dir == 'asc' else 'descending') if sort == col else 'none' }}">
+            <a class="sort-link" href="{{ sort_url(col) }}#transactions" hx-get="{{ sort_url(col) }}" hx-target="#acct-txns"
+               hx-select="#acct-txns" hx-swap="outerHTML" hx-push-url="true">{{ label }}</a></th>
+          {%- if col == 'date' %}
+          <th class="logo-col"><span class="visually-hidden">Merchant logo</span></th>
+          {%- endif %}
+          {% endfor %}
+          {% if rewards_col %}<th class="num">{{ reward_units[rewards_col] }}</th>{% endif %}
+          {% else %}
+          <th class="date-col">Date</th>
+          <th class="logo-col"><span class="visually-hidden">Merchant logo</span></th>
+          <th>Description</th><th>Category</th>
+          <th class="num amount-col">Amount</th>
+          {% endif %}
+        </tr>
+      </thead>
+      <tbody>
+      {% set account_view, hide_account, hide_select = true, true, true %}
+      {# a card's rewards balances you entered sit among its transactions by date (user's request 2026-10-26) #}
+      {% set day = namespace(last=none) %}
+      {% for kind, t in lines %}
+      {%- set d = t.as_of if kind == 'balance' else t.date %}
+      {%- if by_date and d != day.last %}<tr class="date-head"><th colspan="8" scope="rowgroup">{{ d | date_label }}</th></tr>{% set day.last = d %}{% endif %}
+      {% if kind == 'balance' %}
+        <tr class="balance-line">
+          <td class="nowrap">{{ t.as_of | date_label }}</td>
+          <td class="logo-col"></td>
+          <td colspan="{{ 3 if card_col is defined and card_col else 2 }}">Rewards balance{% if not rewards_col or t.unit != rewards_col %} <span class="muted">· {{ reward_label(t.unit, t.amount) }}</span>{% endif %}</td>
+          <td></td>
+          {% if rewards_col %}<td class="num">{% if t.unit == rewards_col %}{{ t.amount | money if t.unit == 'cash' else '{:,}'.format(t.amount) }}{% endif %}</td>{% endif %}
+        </tr>
+      {% else %}{% include "_txn_row.html" %}{% endif %}
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if more %}<p class="muted small">The newest 200. <a href="{{ more }}">All of them on Transactions</a></p>{% endif %}
+  {% else %}
+  <p class="muted small">{{ 'No transactions match.' if filtered else 'No transactions.' }}</p>
+  {% endif %}
+  </div>
+</section>
+{% endif %}
+
+{# The account's own rules (user's request 2026-10-13: moved here): money lent = which bank transfers link to it;
+   a connected investment account = which unpaired bank transfers went into it. #}
+{% if purpose %}{% include "_purpose_rules.html" %}{% endif %}
+{% if destination_rules is defined %}{% include "_destination_rules.html" %}{% endif %}
+
+{# A manual account: archive / restore and delete (from /manual/{id}, 2026-10-15) #}
+{% if account.is_manual %}
+<section class="card">
+  <h2>Manage</h2>
+  <form method="post" action="/manual/{{ account.id }}/archive" class="inline-form">
+    <input type="hidden" name="archived" value="{{ '0' if account.is_hidden else '1' }}">
+    {% if account.is_hidden %}
+      <button type="submit" class="secondary">Restore</button>
+      <span class="muted small">Count it in net worth again.</span>
+    {% else %}
+      <button type="submit" class="secondary">Archive</button>
+      <span class="muted small">Sold or paid off? Stops counting from today; past history is kept.</span>
+    {% endif %}
+  </form>
+  <details class="danger-zone">
+    <summary>Delete permanently</summary>
+    <p>Removes this account, all its values, and its past history from net worth. Use this for mistakes;
+      use Archive for things you no longer own.</p>
+    <form method="post" action="/manual/{{ account.id }}/delete" class="inline-form">
+      <label>Type <strong>{{ account.name }}</strong> to confirm: <input name="typed_name" autocomplete="off" required></label>
+      <button type="submit" class="danger">Delete</button>
+    </form>
+  </details>
+</section>
+{% endif %}
+{% endblock %}

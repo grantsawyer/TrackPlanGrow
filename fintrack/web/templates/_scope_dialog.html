@@ -1,0 +1,12 @@
+{# "How far does this budget apply?" Shared by the Month view and the 1-year view. A budget box
+   with data-scope-form="<form id>" opens it when changed (ui.js); the choice fills that form's
+   category / month / amount / scope fields and submits it (htmx). #}
+<dialog id="scope-dialog" class="scope-dialog" aria-labelledby="scope-title">
+  <p id="scope-title"><strong data-scope-what></strong></p>
+  <div class="actions">
+    <button type="button" data-scope="month"></button>
+    <button type="button" data-scope="forward" class="secondary"></button>
+    <button type="button" data-scope="cancel" class="secondary">Cancel</button>
+  </div>
+  <p class="muted small">"Every month after" also replaces any later changes to this line.</p>
+</dialog>

@@ -1,0 +1,72 @@
+{# Categories to review (user's request 2026-11-01; categories.review_rows): new transactions Plaid put in a first-level
+   category that has subcategories. Just above the list. Starts collapsed, showing how many and their value; opened, its rows
+   look like the list's, each with a dropdown of every category. Dismiss accepts the rows shown as they are. Plain POSTs.
+   Since 2026-11-14 (user's request): its own filters (search, category, account), sortable headings and a bulk bar for
+   the checked rows (a category for all of them, or keep theirs); web/transaction_groups.review_view, its r_* parameters. #}
+{% if review_all %}
+{% set review_cents = review_rows | sum(attribute='amount_cents') %}
+<section class="card review-card" data-keep-scroll>
+  <form method="post" action="/transactions/category-review/accept" class="review-dismiss">
+    <input type="hidden" name="return_url" value="{{ review_done }}">
+    {% for r in review_rows %}<input type="hidden" name="ids" value="{{ r.id }}">{% endfor %}
+    <button type="submit" class="secondary" title="Keep the categories of the rows shown"{% if not review_rows %} disabled{% endif %}>Dismiss</button>
+  </form>
+  <details{% if review_open %} open{% endif %}>
+    <summary><h2>Categories to review</h2>
+      <span class="muted small">{{ review_rows | length }}{% if review.filtered %} of {{ review_all | length }}{% endif %} transaction{{ '' if (review_all | length) == 1 else 's' }} ·
+        <span class="{{ 'ok' if review_cents < 0 }}">{% if review_cents < 0 %}+{{ (-review_cents) | money_whole }}{% else %}{{ review_cents | money_whole }}{% endif %}</span></span></summary>
+
+    <div class="review-tools">
+      {# the card's own filters: the list's are kept as they are #}
+      <form id="review-filters" method="get" action="/transactions" class="inline-form review-filters">
+        {% for k, v in review_keep %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+        {% if request.query_params.get('r_sort') %}<input type="hidden" name="r_sort" value="{{ review.sort }}">{% endif %}
+        {% if request.query_params.get('r_dir') %}<input type="hidden" name="r_dir" value="{{ request.query_params.get('r_dir') }}">{% endif %}
+        <input type="hidden" name="review" value="1">
+        <input type="search" name="r_q" value="{{ review.q }}" placeholder="Search" aria-label="Search the transactions to review">
+        <select name="r_cat" data-autosubmit aria-label="Category">
+          <option value="">All categories</option>
+          {% for key, label in review.categories %}<option value="{{ key }}" {% if key == review.category %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <select name="r_account" data-autosubmit aria-label="Account">
+          <option value="">All accounts</option>
+          {% for key, label in review.accounts %}<option value="{{ key }}" {% if key == review.account %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        {% if review.filtered %}<a class="small" href="/transactions?{{ (review_keep + [('review', '1')]) | urlencode }}">Clear</a>{% endif %}
+      </form>
+      {# the checked rows (boxes belong to this form): one category for all, or keep theirs #}
+      <form id="review-bulk" method="post" action="/transactions/category-review/bulk" class="inline-form review-bulk">
+        <input type="hidden" name="return_url" value="{{ review_return }}">
+        <select name="category" aria-label="Category for the checked transactions">
+          <option value="">Category…</option>
+          {% for heading, group in categories | by_kind %}<optgroup label="{{ heading }}">{% for c in group %}<option value="{{ c.key }}">{{ c | category_option }}</option>{% endfor %}</optgroup>{% endfor %}
+        </select>
+        <button type="submit" name="action" value="set" class="secondary">Set</button>
+        <button type="submit" name="action" value="accept" class="secondary">Keep theirs</button>
+      </form>
+    </div>
+
+    {% if review_rows %}
+    {# the main table's own rows and classes (_txn_row.html), its own class added so "the list's table" stays unique #}
+    <div class="table-wrap txns-wrap txn-columns">
+      <table class="data txns review-table">
+        <thead><tr>
+          <th class="select-col"><input type="checkbox" data-check-all="review-select" aria-label="Select all shown"></th>
+          {% for col, label, cls in [('date', 'Date', ''), ('description', 'Description', ''), ('category', 'Category', ''),
+                                     ('account', 'Account', ''), ('amount', 'Amount', 'num')] %}
+          <th class="{{ cls }}" aria-sort="{{ ('descending' if review.desc else 'ascending') if review.sort == col else 'none' }}">
+            <a class="sort-link" href="{{ review_sort_url(col) }}">{{ label }}</a></th>
+          {%- if col == 'date' %}<th class="logo-col"><span class="visually-hidden">Merchant logo</span></th>{% endif %}
+          {% endfor %}
+        </tr></thead>
+        <tbody>
+        {% with review_row = true, account_view = false %}{% for t in review_rows %}{% include "_txn_row.html" %}{% endfor %}{% endwith %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="muted small">None match.</p>
+    {% endif %}
+  </details>
+</section>
+{% endif %}

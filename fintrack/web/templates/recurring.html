@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% from "_charts.html" import chart as viz %}
+{% block title %}Recurring · Track Plan Grow{% endblock %}
+{# In the ribbon, top right (user's request 2026-10-06): re-run recurring detection on the
+   transactions already saved (no Plaid call; it also runs after every sync). #}
+{% block tabbar_controls %}
+<form method="post" action="/recurring/refresh" class="tabbar-controls">
+  <button type="submit" class="secondary" title="Look for recurring items in your saved transactions again (no bank sync; this also runs after every sync)">Check again</button>
+</form>
+{% endblock %}
+{% block content %}
+{% if msg %}<p class="flash ok" role="status">{{ msg }}</p>{% endif %}
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+
+{# Top (user's request 2026-10-16): this month's confirmed recurring income and expenses on each day they're due (annual
+   items left out; visuals.recurring_by_day), each card with the month's total, then the next 30 days. The cash-flow
+   forecast moved to the Cash flow page. #}
+{#- phone-swipe: on a phone the two charts are one row you swipe through (app.css; user's request 2026-11-06) -#}
+<div class="grid-2 phone-swipe">
+  {% for chart_id, title, data, measure, direction, empty in [
+       ("rc-income", "Recurring income this month", income_by_day, "Total income", "in", "No confirmed recurring income this month."),
+       ("rc-bills", "Recurring expenses this month", bills_by_day, "Total expenses", "out", "No confirmed recurring expenses this month.")] %}
+  <section class="card">
+    <div class="card-head"><h2>{{ title }}</h2></div>
+    {# the month's total as a measure, formatted like the Net worth page's account cards (user's request 2026-10-16) #}
+    <div class="measure-row">
+      <div class="measure">
+        <span class="measure-value">{{ data.total_cents | money_whole }}</span>
+        <span class="kpi-label">{{ measure }}</span>
+      </div>
+    </div>
+    {% if data.total_cents %}
+      {{ viz(chart_id, "daybars", data, size="medium", label=title ~ ", by day", value_label=measure[6:] | capitalize, direction=direction) }}
+    {% else %}<p class="muted">{{ empty }}</p>{% endif %}
+  </section>
+  {% endfor %}
+</div>
+
+<section class="card">
+  <div class="card-head"><h2>Next 30 days</h2><span class="muted small">confirmed items and card statements, checking &amp; savings</span></div>
+  {% if upcoming %}
+    {# row-cards: on a phone, name … amount, then its date (app.css) #}
+    <table class="data compact row-cards">
+      <tbody>
+      {% for e in upcoming %}
+        <tr><td class="nowrap rc-sub">{{ e.day | date_label }}</td><td class="rc-main">{{ e.name }}{% if e.overdue %} <span class="status status-near">⚠ overdue, assumed today</span>{% endif %}</td>
+          <td class="num rc-amt {{ 'ok' if e.change_cents > 0 else '' }}">{% if e.change_cents > 0 %}+{% endif %}{{ e.change_cents | money }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted small">Nothing confirmed is due in the next 30 days.</p>
+  {% endif %}
+</section>
+
+{% set head %}<thead><tr><th>Name</th><th class="num">Amount</th><th>How often</th><th>Next</th><th>Account</th><th>History</th><th></th></tr></thead>{% endset %}
+
+<section class="card">
+  <h2>Needs review ({{ detected | length }})</h2>
+  {% if detected %}
+    <div class="table-wrap"><table class="data row-cards">{{ head }}<tbody>
+      {% for r in detected %}{% include "_recurring_row.html" %}{% endfor %}
+    </tbody></table></div>
+  {% else %}
+    <p class="muted">Nothing new to review.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Confirmed ({{ confirmed | length }})</h2>
+  {% if confirmed %}
+    <div class="table-wrap"><table class="data row-cards">{{ head }}<tbody>
+      {% for r in confirmed %}{% include "_recurring_row.html" %}{% endfor %}
+    </tbody></table></div>
+    <p class="muted small">⚠ overdue: the date passed with no matching transaction yet. In the cash-flow forecast a late bill is
+      assumed to be paid today; a late paycheck is not assumed to arrive.</p>
+  {% else %}
+    <p class="muted">None yet. Confirm items above, or add your own below.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <details>
+    <summary><h2 class="inline">Add your own</h2></summary>
+    <p class="muted small">For income or bills not in your history yet (a new subscription, a raise). Its history isn't linked,
+      so don't add something that's already detected.</p>
+    {% with item=None, part="" %}{% include "_recurring_form.html" %}{% endwith %}
+  </details>
+</section>
+
+{% if dismissed %}
+<section class="card">
+  <details>
+    <summary><h2 class="inline">Dismissed ({{ dismissed | length }})</h2></summary>
+    <div class="table-wrap"><table class="data row-cards">{{ head }}<tbody>
+      {% for r in dismissed %}{% include "_recurring_row.html" %}{% endfor %}
+    </tbody></table></div>
+  </details>
+</section>
+{% endif %}
+{% endblock %}

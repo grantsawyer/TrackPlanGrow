@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% from "_balance_chart.html" import projected_balance %}
+{% from "_charts.html" import chart as viz, seg_label %}
+{% block title %}Cash flow · Track Plan Grow{% endblock %}
+{# In the ribbon (user's requests 2026-10-23/24): the cash account and the range, 30 / 90 / 180 days. Both reload the
+   page (?account=&days=), which renders the tiles and both charts for them. The account picker is greyed out with
+   one cash account. The low-balance threshold is in the projected chart's header, by the line it draws. #}
+{% block tabbar_controls %}
+{% if selected %}
+<div class="tabbar-controls">
+  <form method="get" action="/cash-flow" class="inline-form">
+    <input type="hidden" name="days" value="{{ days }}">
+    <select name="account" aria-label="Cash account" data-autosubmit {% if choices | length < 2 %}disabled title="Your only cash account"{% endif %}>
+      {% for a in choices %}<option value="{{ a.account_id }}" {% if a.account_id == selected.account_id %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
+    </select>
+    <noscript><button type="submit" class="secondary">Show</button></noscript>
+  </form>
+  <div class="seg" role="group" aria-label="Time range">
+    {%- for d in chart_days %}<a href="/cash-flow?account={{ selected.account_id }}&amp;days={{ d }}" {% if d == days %}aria-current="true"{% endif %} aria-label="{{ d }} days">{{ seg_label(d ~ ' days') }}</a>{% endfor -%}
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+{% macro delta(cents, good_when_up=true) -%}
+<span class="{{ 'delta-up' if (cents >= 0) == good_when_up else 'delta-down' }}">{{ '▲' if cents >= 0 else '▼' }} {{ (cents | abs) | money_whole }}</span>
+{%- endmacro %}
+{% block content %}
+{% if msg %}<p class="flash ok" role="status">{{ msg }}</p>{% endif %}
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+{% if not selected %}
+<section class="card">
+  <div class="card-head"><h2>Projected balance</h2></div>
+  <p class="muted">No checking or savings balances to project yet.</p>
+</section>
+{% else %}
+{% set m = measures %}
+{# Three tiles for the account and range (forecast.cash_measures; user's request 2026-10-24) #}
+{#- Phones (user's request 2026-11-06; .w-long / .w-short): "vs <date>" on one line; the second tile "Balance in <range>"
+    with the projected end balance and its change "vs Today"; the third "Min. Balance" -#}
+<section class="kpis equal three">
+  <div class="tile">
+    <div class="kpi-label">Balance</div>
+    <div class="tile-value">{{ m.current_cents | money_whole }}</div>
+    <div class="kpi-sub cf-one-line">{{ delta(m.change_cents) }} <span class="w-long">since</span><span class="w-short">vs</span> {{ m.since | date_label }}</div>
+  </div>
+  <div class="tile">
+    <div class="kpi-label"><span class="w-long">Projected change per month</span><span class="w-short">Balance in {{ days }} days</span></div>
+    <div class="tile-value"><span class="w-long">{{ '+' if m.monthly_cents > 0 }}{{ m.monthly_cents | money_whole }}</span><span class="w-short">{{ m.end_cents | money_whole }}</span></div>
+    <div class="kpi-sub cf-one-line"><span class="w-long">{{ m.current_cents | money_whole }} → {{ m.end_cents | money_whole }} in {{ days }} days</span><span class="w-short">{{ delta(m.end_cents - m.current_cents) }} vs Today</span></div>
+  </div>
+  <div class="tile">
+    <div class="kpi-label"><span class="w-long">Lowest projected balance</span><span class="w-short">Min. Balance</span></div>
+    <div class="tile-value">{{ m.lowest_cents | money_whole }}</div>
+    <div class="kpi-sub">on {{ m.lowest_day | date_label }}{% if m.below_threshold %} · <span class="status-text critical">✕ below {{ threshold_cents | money_whole }}</span>{% endif %}</div>
+  </div>
+</section>
+
+{# History and projection side by side at every width, past on the left (user's request 2026-10-24) #}
+<div class="chart-pair">
+{# The balance over the past `days`, worked back from today's through posted transactions (forecast.balance_history;
+   user's request 2026-10-24) #}
+<section class="card">
+  <div class="card-head chart-head"><h2>Balance history</h2></div>
+  {# drawn like the projection (warning line, the day's transactions on hover), on the same y-axis (2026-10-24) #}
+  {{ viz("cf-history", "balance", history_chart, size="short", label="Balance over the last " ~ days ~ " days", no_table="1") }}
+</section>
+<section class="card">
+  {% call projected_balance("cf-balance", balance_chart, heading="h2", title="Projected balance") %}
+  <form method="post" action="/forecast/threshold" class="inline-form">
+    <input type="hidden" name="account" value="{{ selected.account_id }}"><input type="hidden" name="days" value="{{ days }}">
+    {# saves when changed (Enter or leaving the field; ui.js data-autosubmit), no Save button (2026-10-24) #}
+    <label class="small muted">Warn below <input name="amount" size="7" inputmode="decimal" value="{{ '%.0f' | format(threshold_cents / 100) }}" data-autosubmit></label>
+    <noscript><button type="submit" class="secondary">Save</button></noscript>
+  </form>
+  {% endcall %}
+</section>
+</div>
+{% endif %}
+
+{# The last and the next `days` days of the account, side by side at every width, past on the left; both start at
+   today (past newest first) and scroll inside the card (user's requests 2026-10-24) #}
+{#- phone-swipe: on a phone the two lists are a row you swipe through (app.css; user's request 2026-11-06) -#}
+<div class="chart-pair list-pair{{ ' long-dates' if long_dates }} phone-swipe">
+{% if selected %}
+<section class="card">
+  {% with coming_up_card = true, coming_up_days = days, upcoming = past, past_list = true,
+          list_title = "In the last " ~ days ~ " days", empty_text = "No transactions in the last " ~ days ~ " days." %}
+    {% include "_coming_up.html" %}
+  {% endwith %}
+</section>
+{% endif %}
+<section class="card">
+  {% with coming_up_card = true, coming_up_days = days %}{% include "_coming_up.html" %}{% endwith %}
+</section>
+</div>
+
+{# Credit cards: what the forecast estimates for each card's later statements (cards.estimates; user's request
+   2026-10-24): spend over the last 30 days and the average monthly spend (user's request 2026-10-27; with their
+   totals), the monthly due date and who pays it #}
+{% macro ordinal(n) -%}
+{{ n }}{{ 'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th') }}
+{%- endmacro %}
+{% if card_estimates %}
+<section class="card">
+  <div class="card-head"><h2>Credit cards</h2></div>
+  <div class="table-wrap">
+    {# phones (user's request 2026-11-06): one row a card, card (due day) · last 30 days · monthly avg in whole
+       dollars; the Months, Due and Paid from columns hidden (app.css .card-estimates) #}
+    <table class="data compact card-estimates">
+      <thead><tr><th>Card</th><th class="num">Last 30 days</th><th class="num">Monthly Avg.</th><th class="muted center">Months</th><th class="center">Due</th><th>Paid from</th></tr></thead>
+      <tbody>
+      {% for e in card_estimates %}
+        <tr>
+          <td><a href="/accounts/{{ e.card_id }}">{{ e.card_name }}</a>{% if e.pay_day %}<span class="w-short muted small"> (due {{ ordinal(e.pay_day) }})</span>{% endif %}</td>
+          <td class="num"><span class="w-long">{{ e.last_30_cents | money }}</span><span class="w-short">{{ e.last_30_cents | money_whole }}</span></td>
+          <td class="num">{% if e.monthly_cents is not none %}<span class="w-long">{{ e.monthly_cents | money }}</span><span class="w-short">{{ e.monthly_cents | money_whole }}</span>{% else %}<span class="muted" title="Needs a complete month of history">—</span>{% endif %}</td>
+          {# months averaged, in their own column so the amounts (and the total) line up #}
+          <td class="muted small center">{% if e.months %}{{ e.months }}{% endif %}</td>
+          <td class="center">{% if e.pay_day %}{{ ordinal(e.pay_day) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td class="muted">{% if e.pay_from is not none %}{{ payer_names.get(e.pay_from, '—') }}{% else %}<a href="/accounts/{{ e.card_id }}">choose a paying account</a>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+      {# the totals: last 30 days, and the averages (cards without one left out; user's request 2026-10-24) #}
+      {% set averaged = card_estimates | rejectattr('monthly_cents', 'none') | list %}
+      {% set t30, tavg = card_estimates | sum(attribute='last_30_cents'), averaged | sum(attribute='monthly_cents') %}
+      <tfoot><tr class="total-row"><td>Total</td><td class="num"><span class="w-long">{{ t30 | money }}</span><span class="w-short">{{ t30 | money_whole }}</span></td>
+        <td class="num">{% if averaged %}<span class="w-long">{{ tavg | money }}</span><span class="w-short">{{ tavg | money_whole }}</span>{% endif %}</td><td colspan="3"></td></tr></tfoot>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

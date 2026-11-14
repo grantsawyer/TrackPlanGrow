@@ -1,0 +1,21 @@
+{# The projected balance chart: today and the next 30 days for each forecast account, with an account picker when
+   there are several (visuals.balance_forecast, from forecast.cash_flow). Shared by the Overview's Cash flow card and
+   the Cash flow page (user's request 2026-10-14). No "Show data" table: both show the "Coming up" list right below
+   (_coming_up.html), which lists the same events (user's choice). #}
+{% from "_charts.html" import chart as viz %}
+{# `title`: the heading (the Cash flow page's range buttons change the days shown). A {% call %} block adds controls to
+   the header, after the account picker (the Cash flow page's Warn below; user's request 2026-10-23). #}
+{% macro projected_balance(id, data, heading="h3", title="Balance: today and the next 30 days") -%}
+<div class="card-head chart-head">
+  <{{ heading }}>{{ title }}</{{ heading }}>
+  <div class="chart-head-controls">
+  {% if data.accounts | length > 1 %}
+    <select data-chart-pick="{{ id }}" aria-label="Account to chart">
+      {% for a in data.accounts %}<option value="{{ loop.index0 }}">{{ a.label }}</option>{% endfor %}
+    </select>
+  {% endif %}
+  {% if caller is defined %}{{ caller() }}{% endif %}
+  </div>
+</div>
+{{ viz(id, "balance", data, size="short", label=title, no_table="1") }}
+{%- endmacro %}

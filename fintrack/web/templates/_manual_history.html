@@ -1,0 +1,174 @@
+{# A manual account's History (moved here from its /manual page, user's request 2026-10-13): money lent = linked
+   transfers + adjustments (History); every other manual account = its **Balances** (user's request 2026-11-14: only
+   balance updates; activity is under Transactions): an investment account's balances of holdings (Add balance, edit
+   in place, set a price), and the whole account's values (Add value / Add balance when it has no holdings). Needs
+   web/accounts.manual_history_context. Its forms come back to the account page. #}
+{# Investment / retirement accounts (user's request 2026-10-12): one History table of your events and an Add form;
+   no separate positions section. An event = date, ticker, Contribution / Withdrawal / Balance, and a quantity (shares)
+   or a value (dollars, turned into shares at that day's price; manual_positions.py). A new ticker becomes a line.
+   The daily values revaluing writes still drive net worth and charts but aren't events, so they aren't listed. #}
+{% set unpriced = positions | selectattr('ticker') | rejectattr('price') | list %}
+{% if purpose %}
+{# A purpose account (Money lent; purposes.py, user's request 2026-10-12): its balance is the transfers linked to it
+   (by the rules below, or from a transaction's edit panel on Transactions) plus adjustments; never typed. #}
+<section class="card">
+  <div class="card-head">
+    <h2>History</h2>
+    <details class="add-event">
+      <summary class="button secondary">Add adjustment</summary>
+      <form method="post" action="/manual/{{ account.id }}/adjustments" class="inline-form">
+        <input type="date" name="date" value="{{ today }}" max="{{ today }}" required aria-label="Date">
+        <input name="amount" required inputmode="decimal" size="12" placeholder="e.g. -2,000" aria-label="Amount (+ adds, - e.g. written off)">
+        <input name="note" maxlength="120" placeholder="Note" aria-label="Note">
+        <button type="submit">Save</button>
+      </form>
+    </details>
+  </div>
+  <div class="table-wrap">
+    <table class="data history">
+      <thead><tr><th>Date</th><th>Description</th><th>Account</th><th class="num">Amount</th><th>Linked by</th><th></th></tr></thead>
+      <tbody>
+      {% for e in purpose_entries %}
+        <tr>
+          <td>{{ e.date | date_label }}</td>
+          <td>{{ e.description }}</td>
+          <td class="muted">{{ e.account_name or '' }}</td>
+          <td class="num {{ 'delta-down' if e.amount_cents < 0 else '' }}">{{ e.amount_cents | money }}</td>
+          <td class="muted small">{% if e.kind == 'adjustment' %}adjustment{% elif e.source == 'rule' %}rule{% else %}you{% endif %}</td>
+          <td>
+            {% if e.kind == 'adjustment' %}
+            <form method="post" action="/purpose-adjustments/{{ e.adjustment_id }}/delete" class="inline-form">
+              <input type="hidden" name="account_id" value="{{ account.id }}">
+              <button type="submit" class="link-button small">Delete</button>
+            </form>
+            {% else %}
+            <form method="post" action="/purpose-links/{{ e.transaction_id }}/unlink" class="inline-form">
+              <input type="hidden" name="account_id" value="{{ account.id }}">
+              <button type="submit" class="link-button small" aria-label="Unlink the {{ e.date | date_label }} transfer">Unlink</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" class="muted">No linked transfers yet. Add a rule below, or link a transfer from its edit panel on Transactions.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{# Balances (user's request 2026-11-14): only balance updates (yours, a statement's, a file's running balance); what
+   activity did is under Transactions, so it isn't repeated here. #}
+{% if not purpose %}
+<section class="card">
+  <div class="card-head">
+    <h2>Balances</h2>
+    {% if not positions %}
+    {# the whole account's value (no holdings): a card's or bank account's balance, a pension's value #}
+    <details class="add-event">
+      <summary class="button secondary">{{ 'Add value' if account.type == 'investment' else 'Add balance' }}</summary>
+      <form method="post" action="/manual/{{ account.id }}/valuations" class="inline-form">
+        <label>Value <input name="value" inputmode="decimal" placeholder="18,000" required></label>
+        <label>As of <input type="date" name="date" value="{{ today }}" max="{{ today }}" required></label>
+        <label>Note <input name="note" placeholder="optional"></label>
+        <button type="submit">Add</button>
+      </form>
+    </details>
+    {% endif %}
+    {% if account.type == 'investment' %}
+    {# a balance you enter (a statement's, a correction); buys, sells, dividends... are Add activity, under
+       Transactions (docs/parity-plan.md decision 2, 2026-11-14) #}
+    <details class="add-event">
+      <summary class="button secondary">Add balance</summary>
+      <form method="post" action="/manual/{{ account.id }}/events" class="inline-form">
+        <input type="hidden" name="kind" value="balance">
+        <input type="date" name="date" value="{{ today }}" max="{{ today }}" required aria-label="Date">
+        <input name="ticker" list="account-lines" maxlength="60" required placeholder="Ticker, e.g. SPY" aria-label="Ticker">
+        <datalist id="account-lines">{% for p in positions %}<option value="{{ p.ticker or p.name }}">{% endfor %}</datalist>
+        <select name="unit" aria-label="Entered as">{% for key, label in event_units.items() %}<option value="{{ key }}"{% if key == 'value' %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+        <input name="amount" required inputmode="decimal" size="11" placeholder="Amount" aria-label="Amount (shares or dollars)">
+        <button type="submit">Save</button>
+      </form>
+    </details>
+    {% endif %}
+  </div>
+  {% for p in unpriced %}
+    <form method="post" action="/positions/{{ p.id }}/price" class="inline-form spaced">
+      <input type="hidden" name="account_id" value="{{ account.id }}">
+      <span class="status status-over">⚠ No price for {{ p.ticker }}</span>
+      <input name="price" required inputmode="decimal" placeholder="Price today" aria-label="{{ p.ticker }} price per share today">
+      <button type="submit" class="secondary small">Set price</button>
+    </form>
+  {% endfor %}
+  <div class="table-wrap">
+    <table class="data history">
+      <thead><tr><th>Date</th><th>Ticker</th><th>Type</th><th>Entered as</th><th class="num">Amount</th>
+        <th class="num">Quantity</th><th class="num">Value</th><th></th></tr></thead>
+      <tbody>
+      {% for e in events %}
+        {% set fid = 'ev-' ~ e.position_id ~ '-' ~ e.date %}
+        {% if e.imported %}
+        {# from an import (2026-11-13): shown as it is; removed with the import's Undo #}
+        <tr>
+          <td>{{ e.date | date_label }}</td>
+          <td title="{{ e.line }}">{{ e.ticker or e.line }}</td>
+          <td>{{ e.label }}</td>
+          <td class="muted small">{{ 'From activity' if e.from_activity else 'Imported' }}</td>
+          <td class="num"></td>
+          <td class="num">{% if e.shares is not none %}{{ '{:,.4f}'.format(e.shares).rstrip('0').rstrip('.') }}{% else %}—{% endif %}</td>
+          <td class="num">{% if e.dollars is not none %}{{ e.dollars | money }}{% else %}—{% endif %}</td>
+          <td>{% if not e.from_activity %}<a class="small" href="/import?account={{ account.id }}">Undo on Import</a>{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td><input type="date" name="date" value="{{ e.date }}" max="{{ today }}" required form="{{ fid }}" aria-label="Date"></td>
+          <td title="{{ e.line }}">{{ e.ticker or e.line }}</td>
+          <td><select name="kind" form="{{ fid }}" aria-label="Type">{% for key, label in event_types.items() %}<option value="{{ key }}"{% if key == e.kind %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
+          <td><select name="unit" form="{{ fid }}" aria-label="Entered as">{% for key, label in event_units.items() %}{% if e.ticker or key == 'value' %}<option value="{{ key }}"{% if key == e.unit %} selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}</select></td>
+          <td class="num"><input name="amount" size="11" inputmode="decimal" required value="{{ e.typed }}" form="{{ fid }}" aria-label="Amount"></td>
+          <td class="num">{% if e.shares is not none %}{{ '{:,.4f}'.format(e.shares).rstrip('0').rstrip('.') }}{% else %}—{% endif %}</td>
+          <td class="num">{% if e.dollars is not none %}{{ e.dollars | money }}{% else %}—{% endif %}</td>
+          <td>
+            <form method="post" action="/positions/{{ e.position_id }}/changes/edit" id="{{ fid }}" class="inline-form">
+              <input type="hidden" name="account_id" value="{{ account.id }}">
+              <input type="hidden" name="old_date" value="{{ e.date }}">
+              <button type="submit" class="secondary small">Save</button>
+            </form>
+            <form method="post" action="/positions/{{ e.position_id }}/changes/delete" class="inline-form">
+              <input type="hidden" name="account_id" value="{{ account.id }}">
+              <input type="hidden" name="date" value="{{ e.date }}">
+              <button type="submit" class="link-button small" aria-label="Delete the {{ e.date | date_label }} {{ e.ticker or e.line }} event">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endif %}
+      {% endfor %}
+      {% for v in typed_valuations %}
+        <tr>
+          {% if positions %}
+          {# Values typed before the account had tickers: earlier history, shown as it was. #}
+          <td>{{ v.date | date_label }}</td><td class="muted">Account</td><td>Value</td><td></td>
+          <td class="num"></td><td class="num"></td><td class="num">{{ v.value_cents | money }}</td><td class="muted small">{{ v.note or '' }}</td>
+          {% else %}
+          <td colspan="8">
+            {# One form per row; Delete uses formaction so there are no nested forms. #}
+            <form method="post" action="/valuations/{{ v.id }}" class="inline-form">
+              <input type="hidden" name="account_id" value="{{ account.id }}">
+              <input type="date" name="date" value="{{ v.date }}" max="{{ today }}" aria-label="As of" required>
+              <input name="value" value="{{ '%.2f' | format(v.value_cents / 100) }}" inputmode="decimal" aria-label="Value" required>
+              <input name="note" value="{{ v.note or '' }}" aria-label="Note" placeholder="note">
+              <button type="submit" class="secondary small">Save</button>
+              {% if typed_valuations | length > 1 %}
+                <button type="submit" class="link-button small" formaction="/valuations/{{ v.id }}/delete" formnovalidate>Delete</button>
+              {% endif %}
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}

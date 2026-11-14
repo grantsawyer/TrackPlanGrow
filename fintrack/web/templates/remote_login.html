@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"{% if theme is defined and theme %} data-theme="{{ theme }}"{% endif %}>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Track Plan Grow</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}">
+  <link rel="manifest" href="{{ url_for('static', path='manifest.webmanifest') }}">
+  <link rel="icon" href="{{ url_for('static', path='icons/favicon.svg') }}" type="image/svg+xml">
+</head>
+{# Phone access (web/remote.py): asked once per phone, then remembered for 30 days. #}
+<body class="remote-login">
+  <main class="card remote-login-card">
+    <h1><img src="{{ url_for('static', path='icons/logo.svg') }}" alt="" width="28" height="28">Track Plan Grow</h1>
+    <form method="post" action="/remote-login">
+      <input type="hidden" name="next" value="{{ next_url }}">
+      <label for="passcode">Passcode</label>
+      <input id="passcode" name="passcode" type="password" autocomplete="current-password" required autofocus>
+      {% if error %}<p class="flash bad" role="alert">{{ error }}</p>{% endif %}
+      <button type="submit">Open</button>
+    </form>
+  </main>
+</body>
+</html>

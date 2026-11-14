@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Connect · Track Plan Grow{% endblock %}
+{% block head_scripts %}{% include "_link_scripts.html" %}{% endblock %}
+{% block content %}
+<p class="muted">You'll sign in to your bank inside Plaid Link. Track Plan Grow never sees your username or password.</p>
+
+<p class="flash bad" id="link-error" hidden></p>
+
+{% if connected %}
+  <section class="card">
+    <h2>Already connected</h2>
+    <p class="muted">To fix a broken login for one of these, use <strong>Reconnect</strong> on the Accounts page.
+      Don't connect it again here; that would create a second Item.</p>
+    <ul>
+      {% for item in connected %}<li>{{ item.institution_name or "Unknown institution" }}</li>{% endfor %}
+    </ul>
+  </section>
+{% endif %}
+
+<form id="connect-form" class="card" data-connected='{{ connected_ids | tojson }}'>
+  <h2>What are you connecting?</h2>
+  {% for key, kind in kinds.items() %}
+    <label class="choice">
+      <input type="radio" name="kind" value="{{ key }}" {% if loop.first %}checked{% endif %}>
+      {{ kind.label }}
+    </label>
+  {% endfor %}
+  <p class="muted small">"Brokerage or retirement" only lists institutions that share investment holdings. Some 401(k) and HSA
+    providers share only balances and transactions; if yours isn't listed there, cancel Link (no Item is used) and choose
+    "Bank, credit card, or loan". In OAuth sign-ins, select every account you want; you can change it later with
+    "Add or remove accounts" without using another Item.</p>
+
+  {% if settings.is_production %}
+    <div class="consent">
+      <h2>Confirm Production Item use</h2>
+      <p>
+        <strong>{{ budget.used }} of {{ budget.limit }} Production Items used, {{ budget.remaining }} remaining.</strong>
+      </p>
+      {% if budget.exhausted %}
+        <p class="bad">All Items are used. Plaid's Trial plan won't allow another connection.</p>
+      {% else %}
+        <ul>
+          <li>Finishing Link uses <strong>1</strong> Item, leaving {{ budget.remaining - 1 }}.</li>
+          <li>Removing the connection later does <strong>not</strong> give the Item back.</li>
+          <li>Each separate login (even at the same bank) is its own Item.</li>
+        </ul>
+        <label>Type <strong>{{ consent_phrase }}</strong> to confirm:
+          <input name="consent" autocomplete="off" required>
+        </label>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <label class="choice small">
+    <input type="checkbox" name="allow_duplicate">
+    I intend a second, separate login at an institution that's already connected
+  </label>
+
+  <button type="submit" {% if settings.is_production and budget.exhausted %}disabled{% endif %}>Open Plaid Link</button>
+</form>
+{% endblock %}

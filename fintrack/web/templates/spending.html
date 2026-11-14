@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% from "_charts.html" import chart as viz %}
+{% from "_icons.html" import category_icon %}
+{% block title %}Spending · Track Plan Grow{% endblock %}
+{% block head_scripts %}
+<script src="{{ url_for('static', path='spending.js') }}" defer></script>
+{% endblock %}
+{# Date range in the ribbon, top right: the same dropdown + From/To as the Transactions page (user's request
+   2026-10-09), run by the same ui.js code (#tx-range, form="txn-filters"); here the form is a plain GET, so
+   the page reloads. Default This month. This/Last month = the cumulative chart against the month before;
+   any other range = monthly totals. #}
+{% block tabbar_controls %}
+{% include "_range_controls.html" %}
+{% endblock %}
+{% block content %}
+{% set r = report %}
+{% set days = period.mode == 'days' %}
+{# The range in words, and what the comparison covers: "Sep 1–4" while this month is in progress, "Sep 2026" for
+   last month, else the equal-length period right before the range. #}
+{% set scope = (month | month_label) if days else ((period.start | date_label) ~ ' – ' ~ (period.end | date_label)) %}
+{% if not days %}{% set prev_vs = 'prior period' %}
+{% elif r.compare_through_day %}{% set prev_vs = (prev_month | month_label('short'))[:3] ~ ' 1–' ~ r.compare_through_day %}
+{% else %}{% set prev_vs = prev_month | month_label('short') %}{% endif %}
+{% set prior_title = 'Compared with ' ~ (prior_start_end[0] | date_label) ~ ' – ' ~ (prior_start_end[1] | date_label) if not days else '' %}
+{# One plain GET form for the ribbon's controls (they point at it with form="txn-filters"). #}
+<form id="txn-filters" class="form-anchor" method="get" action="/spending"></form>
+
+{#- Phones (user's request 2026-11-06): "Spending <range>" and "12-mo Avg", each change in whole dollars without its words;
+    no Transfers tile (.w-long / .w-short, app.css) -#}
+{% set range_word = ranges[period.key] if period.key in ('ytd', 'custom') else ranges[period.key] | lower %}
+<section class="kpis one-row large">
+  <div class="hero">
+    <div class="kpi-label"><span class="w-long">{% if days %}Spent in {{ scope }}{% if r.compare_through_day %} so far{% endif %}{% else %}Spent {{ scope }}{% endif %}</span><span class="w-short">Spending {{ range_word }}</span></div>
+    <div class="hero-value">{{ r.spending_cents | money_whole }}</div>
+    <div class="kpi-sub">
+      {% if r.previous_spending_cents %}
+        {% set diff = r.spending_cents - r.previous_spending_cents %}
+        {# For spending, less is good: down is shown as the "good" color. #}
+        <span class="{{ 'delta-up' if diff <= 0 else 'delta-down' }}" title="vs {{ prev_vs }} ({{ r.previous_spending_cents | money }})">{{ '▼' if diff <= 0 else '▲' }}
+          <span class="w-long">{{ (diff if diff > 0 else -diff) | money }}</span><span class="w-short">{{ (diff if diff > 0 else -diff) | money_whole }}</span></span><span class="w-long"> <span title="{{ prior_title }}">vs {{ prev_vs }}</span> ({{ r.previous_spending_cents | money }})</span>
+      {% else %}
+        <span class="muted" title="{{ prior_title }}">No spending recorded for {{ prev_vs }}.</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="hero">
+    <div class="kpi-label" title="Counted spending over the last 365 days, per month"><span class="w-long">12 month average spend</span><span class="w-short">12-mo Avg</span></div>
+    <div class="hero-value">{{ average_12 | money_whole }}</div>
+    {# Spending in the range set against the average; less is good. A month shows its actual spending; longer
+       ranges show their pace per month (same formula as the average). #}
+    {% if pace and average_12 is not none %}
+    <div class="kpi-sub" title="{% if days %}Spending in {{ scope }}{% else %}Spending per month in this range{% endif %} compared with the 12 month average">
+      {% set gap = pace - average_12 %}
+      {% if gap %}<span class="{{ 'delta-up' if gap < 0 else 'delta-down' }}">{{ '▼' if gap < 0 else '▲' }}
+        {{ (gap if gap > 0 else -gap) | money_whole }}</span><span class="w-long"> · </span>{% endif %}<span class="w-long">{{ 'pace ' if not days }}{{ pace | money_whole }} {{ pace_words }}</span>
+    </div>
+    {% endif %}
+  </div>
+  <div class="hero w-long">
+    <div class="kpi-label">Transfers</div>
+    <div class="hero-value">{{ r.transfers_out_cents | money_whole }}</div>
+    <div class="kpi-sub">
+      <a href="/transactions?{{ txn_query }}&kind=transfer">{{ r.transfers_count }} transfers &amp; card payments</a>
+      {% if r.loan_entries_count %}· <a href="/transactions?{{ txn_query }}&kind=excluded">{{ r.loan_entries_count }} loan entries</a>{% endif %}
+    </div>
+  </div>
+</section>
+
+{#- phone-swipe: on a phone the running total and By category are one row you swipe through, the same height
+    (app.css; user's request 2026-11-06) -#}
+<div class="spend-layout phone-swipe">
+<section class="card spend-chart">
+  {% if days %}
+  <div class="card-head">
+    <h2>{{ month | month_label('short') }} vs {{ prev_month | month_label('short') }}</h2>
+    <span class="muted small">running total by day</span>
+  </div>
+  {{ viz("sp-compare", "lines", compare, size="tall", label="Cumulative spending this month and the month before", emit="1") }}
+  {% else %}
+  <div class="card-head">
+    <h2>Monthly spending</h2>
+  </div>
+  {{ viz("sp-compare", "monthbars", compare, size="tall", label="Spending per month", emit="1") }}
+  {% endif %}
+</section>
+<section class="card spend-table">
+  <div class="spend-fill">
+  <h2>By category</h2>
+  {% if not r.lines %}
+    <p class="muted">No spending in {{ scope }}.</p>
+  {% else %}
+  {% if shares.slices %}{{ viz("sp-share", "treemap", shares, size="treemap", label="Share of spending by category", no_table="1", emit="1") }}{% endif %}
+  <div class="table-wrap">
+    <table class="data breakdown">
+      <thead><tr><th>Category</th><th class="num">Spent</th><th class="num" title="{{ prior_title }}">vs {{ prev_vs }}</th></tr></thead>
+      <tbody>
+      {% for line in category_rows %}
+        {# The whole row picks the category (spending.js); the button inside is for the keyboard. #}
+        <tr class="pick-row" data-pick-category="{{ line.category }}" data-label="{{ line.label }}">
+          <td><span class="cat-cell"><span class="swatch {{ shares.slots.get(line.category, 'slot-other') }}" aria-hidden="true"></span><button type="button" class="cat-pick" aria-pressed="false" title="{{ line.label }}">{{ line.label }}</button>
+            {%- if line.count %}<span class="muted small cat-count">{{ line.count }}</span>{% endif %}</span></td>
+          <td class="num">{{ line.amount_cents | money }}</td>
+          <td class="num {{ 'muted' if line.change_cents == 0 else '' }}">
+            {% if line.change_cents > 0 %}+{% endif %}{{ line.change_cents | money }}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  </div>
+</section>
+</div>
+
+{# Counted spending as a small table. Rows carry data-day / data-month / data-category for spending.js, which
+   shows only the ones matching the day (through it) or month hovered/pinned on the chart and the category
+   picked (treemap or names). #}
+{#- Phones (user's request 2026-11-06, as on Transactions): rows under a heading per date, the category's icon in place
+    of its name (app.css); spending.js hides a heading whose rows are all hidden. -#}
+{% macro txn_table(pane, title, rows) %}
+<div class="txn-pane" data-pane="{{ pane }}">
+  <div class="card-head"><h3>{{ title }}</h3><span class="muted" data-total>{{ rows | sum(attribute='amount_cents') | money }}</span></div>
+  <div class="txn-scroll">
+    <table class="data compact txn-mini">
+      <thead><tr><th class="c-date">Date</th><th class="c-icon"><span class="visually-hidden">Category icon</span></th><th>Description</th><th class="c-cat">Category</th><th class="num c-amt">Amount</th></tr></thead>
+      <tbody>
+      {% for t in rows %}
+        {%- if loop.first or t.date != loop.previtem.date %}<tr class="date-head" data-date-head="{{ t.date }}"><th colspan="5" scope="rowgroup">{{ t.date | date_label }}</th></tr>{% endif %}
+        <tr data-day="{{ t.day }}" data-month="{{ t.month }}" data-category="{{ t.category }}" data-amount="{{ t.amount_cents }}" data-date="{{ t.date }}">
+          <td class="c-date">{{ t.date | date_label }}</td>
+          <td class="c-icon"><span class="merchant-logo category-icon" title="{{ t.category_label }}">{{ category_icon(category_icon_of.get(t.category) if category_icon_of is defined else none, 16) }}</span></td>
+          <td class="c-desc" title="{{ t.description }}">{{ t.description }}</td>
+          <td class="c-cat muted">{{ t.category_label }}</td>
+          <td class="num c-amt">{{ t.amount_cents | money }}</td>
+        </tr>
+      {% endfor %}
+        <tr class="empty-row" {% if rows %}hidden{% endif %}><td colspan="5" class="muted">No transactions.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endmacro %}
+
+<section class="card" id="sp-txns" data-mode="{{ period.mode }}">
+  <div class="card-head">
+    <h2>Transactions</h2>
+    <span class="txn-chips" data-chips></span>
+  </div>
+  <div class="txn-pair{{ '' if days else ' one' }}">
+    {% for pane, rows in panes %}
+      {{ txn_table(pane, ((month if pane == 'this' else prev_month) | month_label) if days else scope, rows) }}
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,46 @@
+{# Overview's calendar (user's request 2026-11-02; web/tags.month_card): one month of the Tags calendar, then countdowns. The
+   arrows swap only this card (htmx); they're links without scripts. #}
+{% from "_tag_calendar.html" import month_grid, day_dialog %}
+{# A timer: its title opens the list of what's coming up; choosing swaps the card (POST /overview/countdown). `blocked`: what
+   the other timer is set to, grayed out here. #}
+{% macro choice_button(timer, month, key, name, day, chosen, blocked) %}
+<button type="button" class="countdown-option" hx-post="/overview/countdown" hx-target="#overview-calendar" hx-swap="outerHTML"
+        hx-vals='{{ {"slot": timer.slot, "choice": key, "month": month} | tojson }}' aria-pressed="{{ 'true' if chosen else 'false' }}" {% if blocked %}disabled title="The other countdown shows this"{% endif %}>
+  <span class="countdown-option-name">{{ name }}</span>{% if day %}<span class="muted small">{{ day | date_label }}</span>{% endif %}
+</button>
+{% endmacro %}
+{% macro countdown(timer, choices, month) %}
+{% set item = timer['item'] %}
+<div class="countdown">
+  <details class="pop-button countdown-pick" data-popover>
+    <summary class="countdown-title" title="{{ item.name }}: choose what this counts down to"><span class="kpi-sub">{{ item.name }}{{ ' in' if item.days }}</span></summary>
+    <div class="pop-panel countdown-panel">
+      {{ choice_button(timer, month, '', 'Next up', none, not timer.pinned, false) }}
+      {% for group, entries in choices.items() if entries %}
+      <div class="countdown-group">{{ group }}</div>
+      {% for c in entries %}{{ choice_button(timer, month, c.key, c.name, c.date, timer.pinned and c.key == item.key, c.key == timer.blocked) }}{% endfor %}
+      {% endfor %}
+    </div>
+  </details>
+  <div class="tile-value">{{ 'Today' if item.days == 0 else '1 day' if item.days == 1 else '{:,} days'.format(item.days) }}</div>
+</div>
+{% endmacro %}
+{% macro step(target, label, text) %}<a href="/?cal={{ target }}" hx-get="/overview/calendar?month={{ target }}" hx-target="#overview-calendar" hx-swap="outerHTML" aria-label="{{ label }}" title="{{ label }}">{{ text }}</a>{% endmacro %}
+<section class="card tag-calendar overview-calendar" id="overview-calendar" data-keep-scroll>
+  <div class="card-head">
+    <h2><a href="/tags?month={{ cal.month }}">{{ cal.month | month_label }}</a></h2>
+    <nav class="seg step-nav" aria-label="Move the calendar">
+      {{ step(cal.prev, 'Back a month', '←') }}
+      {% if cal.month != cal.current %}{{ step(cal.current, 'This month', 'Today') }}{% endif %}
+      {{ step(cal.next, 'Ahead a month', '→') }}
+    </nav>
+  </div>
+  {# the countdowns go right of the calendar when the card is wide enough (app.css), else below #}
+  <div class="overview-cal-body">
+    {{ month_grid(cal.calendar, 'small', false, true) }}
+    <div class="countdowns">
+      {% for timer in cal.timers %}{{ countdown(timer, cal.choices, cal.month) }}{% endfor %}
+    </div>
+  </div>
+  {{ day_dialog(cal.month, '', 'overview') }}
+</section>

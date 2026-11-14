@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en"{% if theme is defined and theme %} data-theme="{{ theme }}"{% endif %}>
+<head>
+  <meta charset="utf-8">
+  {# viewport-fit=cover: on Android (Chrome 135+) the page draws behind the gesture bar instead of Chrome's own light
+     strip, so the phone's bottom icon bar (app.css, padded by env(safe-area-inset-bottom)) colours it in either theme #}
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  {# htmx: no inline indicator styles or eval(), so the strict CSP holds #}
+  <meta name="htmx-config" content='{"includeIndicatorStyles": false, "allowEval": false}'>
+  <title>{% block title %}Track Plan Grow{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}">
+  {# Chrome's "Install page as app": name, icon and standalone window come from the manifest. theme-color tints the
+     app window's title bar: --surface of each theme (app.css), or the one theme chosen with the switch. On a phone
+     (≤640px, listed first: the first match wins) it's --rail, the colour of the top and bottom bars there: it colours
+     the status bar and, in the installed Android app, the gesture bar once a page has loaded (docs/ui.md Phones).
+     data-light / data-dark: what ui.js switches to when you flip the theme. #}
+  <link rel="manifest" href="{{ url_for('static', path='manifest.webmanifest') }}">
+  <link rel="icon" href="{{ url_for('static', path='icons/favicon.svg') }}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="{{ url_for('static', path='icons/icon-192.png') }}">
+  {% set phone_tc = 'name="theme-color" data-light="#eeeee9" data-dark="#121211" data-phone' %}
+  {% set desk_tc = 'name="theme-color" data-light="#ffffff" data-dark="#1f1f1d"' %}
+  {% if theme is defined and theme in ('dark', 'light') %}
+  <meta {{ phone_tc | safe }} content="{{ '#121211' if theme == 'dark' else '#eeeee9' }}" media="(max-width: 640px)">
+  <meta name="theme-color" content="{{ '#1f1f1d' if theme == 'dark' else '#ffffff' }}" data-light="#ffffff" data-dark="#1f1f1d">
+  {% else %}
+  <meta {{ phone_tc | safe }} content="#eeeee9" media="(max-width: 640px) and (prefers-color-scheme: light)">
+  <meta {{ phone_tc | safe }} content="#121211" media="(max-width: 640px) and (prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" data-light="#ffffff" data-dark="#1f1f1d">
+  <meta name="theme-color" content="#1f1f1d" media="(prefers-color-scheme: dark)" data-light="#ffffff" data-dark="#1f1f1d">
+  {% endif %}
+  {# not deferred: after a save it hides the page until it's back at your place (keep-scroll.js) #}
+  <script src="{{ url_for('static', path='keep-scroll.js') }}"></script>
+  {# not deferred either: a phone's slide between pages after a swipe is set up before the page's first frame #}
+  <script src="{{ url_for('static', path='swipe-reveal.js') }}"></script>
+  <script src="{{ url_for('static', path='vendor/htmx-2.0.11.min.js') }}" defer></script>
+  <script src="{{ url_for('static', path='ui.js') }}" defer></script>
+  {# Charts: Chart.js once for every page, then the shared chart kinds (charts.js uses ui.js helpers). #}
+  <script src="{{ url_for('static', path='vendor/chart-4.5.1.umd.min.js') }}" defer></script>
+  {# Treemap chart type (Spending); registers itself with Chart.js. MIT, vendored, no CDN. #}
+  <script src="{{ url_for('static', path='vendor/chartjs-chart-treemap-3.1.0.min.js') }}" defer></script>
+  <script src="{{ url_for('static', path='vendor/chartjs-chart-sankey-0.14.0.min.js') }}" defer></script>
+  <script src="{{ url_for('static', path='charts.js') }}" defer></script>
+  {# Phones only: registers the read-only copy's worker, or removes it when the copy is switched off (web/offline.py) #}
+  {% if offline_copy %}<script src="{{ url_for('static', path='offline-store.js') }}" defer></script>
+  <script src="{{ url_for('static', path='offline-copy.js') }}" defer></script>{% endif %}
+  {% block head_scripts %}{% endblock %}
+</head>
+{% from "_icons.html" import icon %}
+{# Phones (app.css ≤640px): when the page has ribbon controls, its tab (in the line at the bottom; its mark drawn as a
+   handle) slides them up (ui.js [data-controls-toggle]). #}
+{% set page_controls = self.tabbar_controls() | trim %}
+<body data-revision="{{ revision }}"{% if offline_copy %} data-offline-copy="{{ offline_copy }}"{% endif %}{% if offline_session %} data-offline-session="{{ offline_session }}"{% endif %}
+      {%- if nav.prev %} data-swipe-prev="{{ nav.prev }}"{% endif %}{% if nav.next %} data-swipe-next="{{ nav.next }}"{% endif %}
+      {%- if nav.prev_tabs %} data-swipe-prev-tabs='{{ nav.prev_tabs | tojson }}'{% endif %}
+      {%- if nav.next_tabs %} data-swipe-next-tabs='{{ nav.next_tabs | tojson }}'{% endif %}>
+  <div class="shell{{ ' rail-collapsed' if rail_collapsed }}{{ ' rail-expanded' if rail_expanded }}">
+    {# Left rail: the main sections (icon + label; icons only when collapsed).
+       The current section's pages are tabs in the header. #}
+    <aside class="rail" id="rail">
+      <a class="brand" href="/" aria-label="Track Plan Grow home"><img class="brand-logo" src="{{ url_for('static', path='icons/logo.svg') }}" alt="" width="20" height="20"><span class="label" aria-hidden="true">Track Plan Grow</span></a>
+      <nav aria-label="Sections">
+        {% for s in nav.sections %}
+          <a href="{{ s.href }}" title="{{ s.label }}" aria-label="{{ s.label }}" {% if s.active %}aria-current="true" class="active"{% endif %}>
+            {{ icon(s.icon) }}<span class="label">{{ s.label }}</span></a>
+        {% endfor %}
+      </nav>
+      {# Bottom of the rail: sync (icon only when collapsed; the time moves to its tooltip),
+         collapse, and the Plaid environment. #}
+      <div class="rail-foot">
+        {# Light / dark (user's request 2026-10-28): a switch; until you use it the system's setting applies. The
+           choice is a cookie the server reads (data-theme on <html>), so pages open in it with no flash; ui.js flips
+           it and redraws the charts. #}
+        <button type="button" class="rail-theme" role="switch" aria-checked="{{ 'true' if theme is defined and theme == 'dark' else 'false' }}"
+                data-theme-toggle title="Dark mode">
+          {{ icon("moon") }}<span class="label">Dark mode</span><span class="label switch-track" aria-hidden="true"></span></button>
+        {% set synced = "Synced " ~ (last_synced | localtime) if last_synced else "Not synced yet" %}
+        <form method="post" action="/sync" class="rail-sync-form">
+          {# the last sync on a second line inside the button, starting at the icon (user's request 2026-11-14), so the
+             button's own padding spaces it like Dark mode and Collapse #}
+          <button type="submit" class="rail-sync" title="Sync now · {{ synced }}" aria-label="Sync now ({{ synced }})">
+            {{ icon("sync") }}<span class="label">Sync now</span><span class="label sync-time" aria-hidden="true">{{ synced }}</span></button>
+        </form>
+        <button type="button" class="rail-toggle" data-rail-toggle aria-controls="rail"
+                aria-expanded="{{ 'false' if rail_collapsed else 'true' }}"
+                aria-label="{{ 'Expand sidebar' if rail_collapsed else 'Collapse sidebar' }}"
+                title="{{ 'Expand sidebar' if rail_collapsed else 'Collapse sidebar' }}">
+          {{ icon("chevron") }}<span class="label">Collapse</span></button>
+        {#- The Sandbox badge: test data, not yours (the Production one was removed, user's request 2026-11-14). First letter
+            always shows; the rest slides away with the other labels when collapsed. -#}
+        {% if settings.plaid_env != 'production' %}
+        <span class="env env-{{ settings.plaid_env }}" title="Plaid {{ settings.plaid_env }}">
+          {{ settings.plaid_env[0] | upper }}<span class="label">{{ settings.plaid_env[1:] }}</span></span>
+        {% endif %}
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="tabbar">
+        {# The current page's name lives here (pages have no separate title), so show the
+           tabs even for one-page sections such as Overview. #}
+        {% if nav.tabs %}
+          <nav aria-label="Pages" class="tabs{{ ' has-controls' if page_controls }}">
+            {% for t in nav.tabs %}
+              <a href="{{ t.href }}" {% if t.active %}aria-current="page" class="active"{% if page_controls %} data-controls-toggle aria-controls="page-controls"{% endif %}{% endif %}>
+                {{- t.label }}</a>
+            {% endfor %}
+          </nav>
+        {% else %}
+          <span class="tabs-spacer"></span>
+        {% endif %}
+        {# A page's own controls, top right of the ribbon (e.g. Budgets' arrows + view toggle). The wrapper is
+           display: contents on wider screens; on phones it's the panel the current tab opens. #}
+        <div class="tabbar-panel" id="page-controls">{% block tabbar_controls %}{% endblock %}</div>
+      </header>
+      <main>
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+</body>
+</html>

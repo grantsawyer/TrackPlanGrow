@@ -1,0 +1,16 @@
+{# A money-lent account's rules (purposes.py): bank transfers whose description contains the text are linked to it.
+   Moved from /manual/{id} to the account's Balances page (user's request 2026-10-13). Needs `purpose_rules`. #}
+<section class="card">
+  <h2>Rules</h2>
+  {% for r in purpose_rules %}
+    <form method="post" action="/purpose-rules/{{ r.id }}/delete" class="inline-form">
+      <input type="hidden" name="account_id" value="{{ account.id }}">
+      <span>Bank description contains <strong>{{ r.pattern }}</strong></span>
+      <button type="submit" class="link-button small">Remove</button>
+    </form>
+  {% endfor %}
+  <form method="post" action="/manual/{{ account.id }}/purpose-rules" class="inline-form spaced">
+    <input name="pattern" required minlength="3" maxlength="80" placeholder="Text in the bank's description" aria-label="Bank description contains">
+    <button type="submit" class="secondary">Add rule</button>
+  </form>
+</section>

@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit rule' if rule_id else 'New rule' }} · Track Plan Grow{% endblock %}
+{# The rule builder (user's request 2026-11-02; fintrack/rules.py). Rows of conditions, all of which must match, and of
+   actions. Each row has a fieldset per kind of field; ui.js shows and enables the chosen one (a disabled fieldset isn't
+   sent). Inputs are named cond-<n>-… / act-<n>-…; new rows come from the <template>s. The preview follows every change. #}
+{% macro phrase_value(c) %}{{ c.values | join('\n') if c else '' }}{% endmacro %}
+{% macro money_value(c, i) %}{% if c and c.field == 'amount' and c.values | length > i %}{{ '%.2f' | format(c.values[i] / 100) }}{% endif %}{% endmacro %}
+{% macro date_value(c, i) %}{% if c and c.field == 'date' and c.values | length > i %}{{ c.values[i] }}{% endif %}{% endmacro %}
+{% macro op_select(n, field, c) %}
+  <select name="cond-{{ n }}-op" aria-label="How it compares" data-rule-op>
+    {% for key, label in ops[field].items() %}<option value="{{ key }}" {% if c and c.field == field and c.op == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+{% endmacro %}
+{% macro cond_row(n, c) %}
+{% set current = c.field if c else 'description' %}
+<div class="rule-row" data-rule-row>
+  <select name="cond-{{ n }}-field" aria-label="Field" data-rule-kind>
+    {% for key, label in field_labels.items() if key not in ('merchant', 'bank_text') or current == key %}<option value="{{ key }}" {% if current == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  {% for f in ['description', 'merchant', 'bank_text'] %}
+  <fieldset data-for="{{ f }}" {% if current != f %}hidden disabled{% endif %}>
+    {{ op_select(n, f, c) }}
+    {# one alternative per line (or separated by |); grows with its text (user's request 2026-11-02) #}
+    <textarea name="cond-{{ n }}-value" rows="2" placeholder="One per line, any can match" aria-label="Text; one alternative per line">{{ phrase_value(c) if current == f }}</textarea>
+  </fieldset>
+  {% endfor %}
+  <fieldset data-for="amount" {% if current != 'amount' %}hidden disabled{% endif %}>
+    {{ op_select(n, 'amount', c) }}
+    <input name="cond-{{ n }}-value" inputmode="decimal" value="{{ money_value(c, 0) }}" placeholder="50.00" aria-label="Amount">
+    <span data-between {% if not (c and c.field == 'amount' and c.op == 'between') %}hidden{% endif %}>and <input name="cond-{{ n }}-value" inputmode="decimal" value="{{ money_value(c, 1) }}" placeholder="100.00" aria-label="Up to"></span>
+  </fieldset>
+  <fieldset data-for="direction" {% if current != 'direction' %}hidden disabled{% endif %}>
+    <input type="hidden" name="cond-{{ n }}-op" value="is">
+    <select name="cond-{{ n }}-value" aria-label="Direction">
+      <option value="out" {% if c and c.field == 'direction' and c.values[0] == 'out' %}selected{% endif %}>Money out</option>
+      <option value="in" {% if c and c.field == 'direction' and c.values[0] == 'in' %}selected{% endif %}>Money in</option>
+    </select>
+  </fieldset>
+  <fieldset data-for="date" {% if current != 'date' %}hidden disabled{% endif %}>
+    {{ op_select(n, 'date', c) }}
+    <input type="date" name="cond-{{ n }}-value" value="{{ date_value(c, 0) }}" aria-label="Date">
+    <span data-between {% if not (c and c.field == 'date' and c.op == 'between') %}hidden{% endif %}>and <input type="date" name="cond-{{ n }}-value" value="{{ date_value(c, 1) }}" aria-label="Through"></span>
+  </fieldset>
+  <fieldset data-for="category" {% if current != 'category' %}hidden disabled{% endif %}>
+    {{ op_select(n, 'category', c) }}
+    <select name="cond-{{ n }}-value" multiple size="4" aria-label="Plaid's category">
+      {% for heading, group in categories | by_kind %}<optgroup label="{{ heading }}">{% for k in group %}<option value="{{ k.key }}" {% if c and c.field == 'category' and k.key in c.values %}selected{% endif %}>{{ k | category_option }}</option>{% endfor %}</optgroup>{% endfor %}
+    </select>
+  </fieldset>
+  <fieldset data-for="account" {% if current != 'account' %}hidden disabled{% endif %}>
+    {{ op_select(n, 'account', c) }}
+    <select name="cond-{{ n }}-value" multiple size="4" aria-label="Account">
+      {% for a in accounts %}<option value="{{ a.id }}" {% if c and c.field == 'account' and a.id in c.values %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
+    </select>
+  </fieldset>
+  <button type="button" class="link-button muted" data-rule-remove aria-label="Remove this condition">Remove</button>
+</div>
+{% endmacro %}
+{% from "_rule_actions.html" import act_row with context %}
+{% block content %}
+<div class="page-head"><a href="/rules">← Rules</a></div>
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+<form method="post" action="/rules{{ '/' ~ rule_id if rule_id }}" class="rule-builder" data-rule-builder
+      hx-get="/rules/preview" hx-trigger="load, change, keyup changed delay:300ms" hx-target="#rule-preview" hx-swap="innerHTML">
+  {% if rule_id %}<input type="hidden" name="rule_id" value="{{ rule_id }}">{% endif %}
+  {% if return_url %}<input type="hidden" name="return_url" value="{{ return_url }}">{% endif %}
+  <section class="card">
+    <h2>If all of these match</h2>
+    <div data-rule-rows="cond">{% for c in rule.conditions %}{{ cond_row(loop.index0, c) }}{% endfor %}</div>
+    <button type="button" class="secondary" data-rule-add="cond">Add condition</button>
+  </section>
+  <section class="card">
+    <h2>Then do this</h2>
+    <div data-rule-rows="act">{% for a in rule.actions %}{{ act_row(loop.index0, a) }}{% endfor %}</div>
+    <button type="button" class="secondary" data-rule-add="act">Add action</button>
+  </section>
+  <datalist id="rule-tag-names">{% for g in all_tags %}<option value="{{ g.name }}">{% endfor %}</datalist>
+  {# Like a rule you already have (rules.find_similar; user's request 2026-11-02): ask before creating another. #}
+  {% if similar %}
+  <section class="card rule-similar" role="alert">
+    <h2>{% if similar.new_phrases %}You already have a rule like this{% else %}An existing rule already does this{% endif %}</h2>
+    <div class="rule-item">
+      <ul class="rule-lines" aria-label="Conditions">{% for line in similar.conditions %}<li>{{ line }}</li>{% endfor %}</ul>
+      <ul class="rule-lines" aria-label="Actions">{% for line in similar.actions %}<li>{{ line }}</li>{% endfor %}</ul>
+    </div>
+    <div class="edit-actions">
+      {% if similar.new_phrases %}<button type="submit" name="on_similar" value="merge">Add {{ similar.new_phrases | join(', ') }} to that rule</button>
+      {% else %}<a class="button" href="/rules/{{ similar.id }}/edit">Open that rule</a>{% endif %}
+      <button type="submit" name="on_similar" value="new" class="secondary">Create a new rule anyway</button>
+      <a class="muted" href="{{ return_url or '/rules' }}">Cancel</a>
+    </div>
+  </section>
+  {% else %}
+  <div class="edit-actions">
+    <button type="submit">Save rule</button>
+    <a class="muted" href="{{ return_url or '/rules' }}">Cancel</a>
+  </div>
+  {% endif %}
+</form>
+<template data-rule-template="cond">{{ cond_row('__i__', none) }}</template>
+<template data-rule-template="act">{{ act_row('__i__', none) }}</template>
+<section class="card">
+  <h2>Preview</h2>
+  <div id="rule-preview" aria-live="polite"></div>
+</section>
+{% endblock %}

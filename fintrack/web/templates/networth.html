@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% from "_charts.html" import chart as viz %}
+{% from "_balances.html" import layout_toggle, show_toggle, arrow_pct, kind_cards, change_table %}
+{% block title %}Net worth · Track Plan Grow{% endblock %}
+{# Ribbon (user's requests 2026-10-13): the $ / % toggle and the date range (the same controls as Balances; default
+   365 days). Both set "Over time", the cards per kind of account and the Change in value table. #}
+{% block tabbar_controls %}
+<div class="tabbar-group">
+  {{ layout_toggle(layout, layout_links) }}
+  {{ show_toggle(show, show_links) }}
+  {% include "_range_controls.html" %}
+</div>
+{% endblock %}
+{% block content %}
+<form id="txn-filters" class="form-anchor" method="get" action="/networth"><input type="hidden" name="show" value="{{ show }}"><input type="hidden" name="cards" value="{{ layout }}"></form>
+{# ---- Headline figure, then the two sides; each with its % change over the ribbon's date range (user's request
+     2026-10-13; it replaced the "since last month" dollar change), stock style like the cards ---- #}
+{% macro range_pct(value, invert=false) -%}
+{#- phones: one line, the range's short form ("365D"; user's request 2026-11-06) -#}
+<div class="kpi-sub nw-range">{{ arrow_pct(value, invert) }} <span class="muted">{% if period.key == 'custom' %}{{ period.start | date_label }} – {{ period.end | date_label }}{% else %}<span class="w-long">{{ ranges[period.key] }}</span><span class="w-short">{{ ranges[period.key] | replace(' days', 'D') }}</span>{% endif %}</span></div>
+{%- endmacro %}
+{# Net worth half width, Assets and Liabilities a quarter each; narrower: Net worth on its own row, the other two
+   sharing the next (user's request 2026-10-13; .nw-kpis in app.css, a container query on this wrapper) #}
+<div class="nw-kpis-wrap">
+<section class="kpis nw-kpis">
+  <div class="hero">
+    <div class="kpi-label">Net worth</div>
+    <div class="hero-value">{{ nw.net_cents | money_whole }}</div>
+    {{ range_pct(range_change.net_pct if range_change else none) }}
+  </div>
+  <div class="tile">
+    <div class="kpi-label">Assets</div>
+    {# the Net worth figure's size (hero-value; user's request 2026-10-13) #}
+    <div class="hero-value">{{ nw.assets_cents | money_whole }}</div>
+    {{ range_pct(range_change.assets_pct if range_change else none) }}
+  </div>
+  <div class="tile">
+    <div class="kpi-label">Liabilities</div>
+    <div class="hero-value">{{ nw.liabilities_cents | money_whole }}</div>
+    {# the % of the amount owed: opposite colours (owing more = red ▲), as on the Credit cards card #}
+    {{ range_pct(range_change.liabilities_pct if range_change else none, invert=true) }}
+  </div>
+</section>
+</div>
+
+{# ---- History chart: the ribbon's date range (user's request 2026-10-13; its own 90 / 180 / 365 buttons were removed)
+     in the toggle's unit: net worth in dollars ($) or its % change since the range began (%); no helper text (user's
+     request 2026-10-13; dashed stretches = days with no sync, explained in the tooltip's "(no sync)") ---- #}
+<section class="card">
+  {# the same height as the cards below (.over-time-body, user's request 2026-10-13) #}
+  {#- data-mini-charts: on a phone it's 100px tall, so about 3 labels an axis (charts.js mini) -#}
+  <div class="over-time-body" data-mini-charts>
+  {# titled by the range (user's request 2026-10-13; was "Over time"), labelled like the tiles #}
+  <div class="card-head"><h2>Net worth, {% if period.key == 'custom' %}{{ period.start | date_label }} – {{ period.end | date_label }}{% else %}{{ ranges[period.key] }}{% endif %}</h2></div>
+  {% if not history_days %}
+    <p class="muted">History builds from here on: each sync saves a daily snapshot.</p>
+  {% else %}
+    {{ viz("nw-trend", "area", trend,
+           label=("Net worth's % change since the start of the range" if show == 'pct' else "Net worth over time"), unit=show) }}
+  {% endif %}
+  </div>
+</section>
+
+{# "What you own and owe" (stacked areas by account type) was removed at the user's request 2026-10-12. #}
+{# ---- Each kind of account over the chosen range, then the monthly table (moved here from Balances, user's request
+     2026-10-13; the Net worth card and the Accounts card are on Balances) ---- #}
+{{ kind_cards(cards, show, fit4=true, activity=activity) }}
+{{ change_table(table, groups) }}
+{% endblock %}

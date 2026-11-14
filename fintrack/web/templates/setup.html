@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Setup · Track Plan Grow{% endblock %}
+{% block head_scripts %}{% include "_link_scripts.html" %}{% endblock %}
+{% block content %}
+{# Setup (user's request 2026-10-14): the old Settings → Accounts page's contents (connections, manual accounts,
+   removed connections), then this install's configuration checks. #}
+<div class="page-head">
+  <div class="actions">
+    <a class="button secondary" href="/connect">Connect an institution</a>
+  </div>
+</div>
+
+{% if msg %}<p class="flash ok" role="status">{{ msg }}</p>{% endif %}
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+<p class="flash bad" id="link-error" hidden></p>
+
+
+{% if not active %}
+  <p class="empty">No institutions connected yet.
+    {% if not settings.is_production %}In Sandbox, use username <code>user_good</code> and password <code>pass_good</code>.{% endif %}
+  </p>
+{% endif %}
+
+{% for entry in active %}
+  {% set item = entry.item %}
+  {# A connection (user's request 2026-10-14: only the account names, Refresh, Add or remove accounts and Remove this connection; the
+     accounts' details live on their Balances pages). Reconnect still shows when the login is broken: it repairs this
+     connection without using another Plaid Item. #}
+  <section class="card">
+    <div class="card-head">
+      <h2>{{ item.institution_name or "Unknown institution" }}</h2>
+      <div class="actions">
+        <form method="post" action="/items/{{ item.id }}/refresh">
+          <button type="submit" class="secondary">Refresh</button>
+        </form>
+        {% if item.status == 'ok' %}
+          {# Update mode with account selection: change which accounts are shared, no new Item (back on Setup at the
+             user's request 2026-10-15, after its removal 2026-10-14). #}
+          <button type="button" class="secondary" data-link-update data-account-select="1" data-item-id="{{ item.id }}"
+                  title="Share another account from this login, or stop sharing one, without using another Item">Add or remove accounts</button>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if item.status != 'ok' %}
+      <div class="item-error">
+        <strong>{{ "Login required" if item.status == 'login_required' else "Connection error" }}</strong>
+        <span>{{ item.error_message or item.error_code }}</span>
+        {# Update mode repairs this same Item; it never uses another Item. #}
+        <button type="button" data-link-update data-item-id="{{ item.id }}">Reconnect</button>
+      </div>
+    {% endif %}
+
+    <ul class="plain-list account-names">
+      {% for acct in entry.accounts %}
+        <li><a href="/accounts/{{ acct.id }}">{{ acct.name }}</a></li>
+      {% else %}
+        <li class="muted">No accounts loaded. Try Refresh.</li>
+      {% endfor %}
+    </ul>
+
+    <details class="danger-zone">
+      <summary>Remove this connection</summary>
+      <p>
+        This revokes Track Plan Grow's access at Plaid. Past balances and transactions are kept but hidden.
+        {% if settings.is_production %}
+          <strong>Removing does not refund the Item.</strong> It still counts toward your {{ budget.limit }}, and reconnecting
+          this institution later would use another one. To fix a broken login, use Reconnect instead.
+        {% endif %}
+      </p>
+      <form method="post" action="/items/{{ item.id }}/remove" class="inline-form">
+        <label>Type <strong>{{ item.institution_name }}</strong> to confirm:
+          <input name="typed_name" autocomplete="off" required>
+        </label>
+        <button type="submit" class="danger">Remove</button>
+      </form>
+    </details>
+  </section>
+{% endfor %}
+
+<div class="page-head section">
+  <h2>Manual accounts</h2>
+  <a class="button secondary" href="/manual/new">Add manual account</a>
+</div>
+{% if manual_accounts %}
+  <div class="table-wrap">
+    <table class="data">
+      <thead><tr><th>Account</th><th>Kind</th><th class="num">Value</th><th>As of</th></tr></thead>
+      <tbody>
+      {% for a in manual_accounts %}
+        <tr class="{{ 'muted' if a.is_hidden else '' }}">
+          <td><a href="/accounts/{{ a.id }}">{{ a.name }}</a>{% if a.is_hidden %} <span class="tag">archived</span>{% endif %}</td>
+          <td>{{ manual_kind_label(a) }}{% if a.classification == 'liability' %} <span class="tag">liability</span>{% endif %}</td>
+          <td class="num">{{ a.current_balance_cents | money }}</td>
+          <td class="muted small">{{ a.as_of or '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="muted">None yet. Add things Plaid can't see, like a car, your home, or cash.</p>
+{% endif %}
+
+{% if removed %}
+  <h2 class="section">Removed connections</h2>
+  <p class="muted">Kept as a permanent record{% if settings.is_production %}; these still count toward the Item limit{% endif %}.</p>
+  <ul class="removed">
+    {% for item in removed %}
+      <li>{{ item.institution_name or "Unknown institution" }} <span class="muted">removed {{ item.removed_at[:10] }}</span></li>
+    {% endfor %}
+  </ul>
+{% endif %}
+
+<h2 class="section">Configuration</h2>
+
+<table class="status">
+  <tr>
+    <th>HTTPS</th>
+    <td class="ok">Serving on {{ settings.base_url }} (bound to 127.0.0.1 only)</td>
+  </tr>
+  <tr>
+    <th>Plaid environment</th>
+    <td>{{ settings.plaid_env }}</td>
+  </tr>
+  <tr>
+    <th>Plaid keys</th>
+    {% if settings.plaid_client_id and settings.plaid_secret %}
+      <td class="ok">Client ID and {{ settings.plaid_env }} secret loaded</td>
+    {% else %}
+      <td class="warn">Missing: fill in {{ settings.env_file }}</td>
+    {% endif %}
+  </tr>
+  <tr>
+    <th>Live stock prices</th>
+    {% if settings.quotes_enabled %}
+      <td class="ok">On: Alpaca keys loaded (live prices and daily price history; only tickers are sent)</td>
+    {% else %}
+      <td class="muted">Off: add ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY to {{ settings.env_file }} for live prices and history (optional)</td>
+    {% endif %}
+  </tr>
+  <tr>
+    <th>OAuth redirect URI</th>
+    <td><code>{{ settings.redirect_uri }}</code> (register this in the Plaid dashboard)</td>
+  </tr>
+  <tr>
+    <th>Token encryption key</th>
+    {% if keychain_ok %}
+      <td class="ok">Present in macOS Keychain</td>
+    {% else %}
+      <td class="bad">Missing: run <code>fintrack init</code></td>
+    {% endif %}
+  </tr>
+  <tr>
+    <th>Database</th>
+    {% if pending_migrations %}
+      <td class="warn">Pending migrations: {{ pending_migrations | join(", ") }}. Run <code>fintrack migrate</code>.</td>
+    {% else %}
+      <td class="ok">Up to date</td>
+    {% endif %}
+  </tr>
+  <tr>
+    <th>Production Items</th>
+    <td class="{{ 'bad' if budget.exhausted else '' }}">
+      {{ budget.used }} of {{ budget.limit }} used, {{ budget.remaining }} remaining
+      <span class="muted">(removed Items still count)</span>
+    </td>
+  </tr>
+  <tr>
+    <th>Data folder</th>
+    <td><code>{{ settings.home }}</code></td>
+  </tr>
+</table>
+{% endblock %}

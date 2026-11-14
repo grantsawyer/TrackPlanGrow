@@ -1,0 +1,10 @@
+{# The watchlist box's matches (web/investments.search_watched; user's decision 2026-11-04): each its own form, so one click
+   adds it with its company name. Nothing for a blank box. #}
+{% for f in found %}
+<form method="post" action="/investments/watchlist" class="watch-result">
+  <input type="hidden" name="ticker" value="{{ f.symbol }}"><input type="hidden" name="name" value="{{ f.name[:60] }}">
+  <button type="submit" class="link-button" title="Watch {{ f.symbol }}">
+    <span class="watch-symbol">{{ f.symbol }}</span> <span class="watch-name">{{ f.name }}</span>
+    <span class="muted small">{{ f.exchange }}</span></button>
+</form>
+{% endfor %}

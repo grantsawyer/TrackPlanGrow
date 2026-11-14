@@ -1,0 +1,13 @@
+{# A transaction's tags in its edit panel (tags.py, user's request 2026-10-28): each with a × to take it off, and a box
+   to add one, suggesting your tags (a new name makes a new tag). × updates this line and the row's chips (out of band) and
+   keeps the panel open; a tag typed in the box is added by the panel's Save (Enter too). #}
+{% from "_tags.html" import tag_chips %}
+<div class="small tag-line" id="tag-line-{{ t.id }}">
+  {% for g in tags_here %}<span class="tag-chip">{{ g.name }}<button type="button" class="tag-remove"
+      hx-post="/transactions/{{ t.id }}/tags/remove" hx-vals='{"tag_id": "{{ g.id }}"}' hx-target="#tag-line-{{ t.id }}"
+      hx-swap="outerHTML" aria-label="Remove the tag {{ g.name }}" title="Remove">×</button></span>{% endfor %}
+  <input name="new_tag" list="tag-names-{{ t.id }}" maxlength="40" placeholder="Add a tag" aria-label="Add a tag">
+  <datalist id="tag-names-{{ t.id }}">{% for g in all_tags %}<option value="{{ g.name }}">{% endfor %}</datalist>
+  {% if tag_error %}<span class="flash-inline bad" role="status">{{ tag_error }}</span>{% endif %}
+</div>
+{% if oob %}{{ tag_chips(t.id, tags_here, oob=True) }}{% endif %}

@@ -1,0 +1,112 @@
+{# Section icons: simple 24x24 stroke drawings in the text color (currentColor), so
+   they follow light/dark mode. Drawn for fintrack; no icon font or CDN. Decorative:
+   the link's text or aria-label names the section. #}
+{% macro icon(name) -%}
+<svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+{#- `.icon-fill` shapes: the section icons' fill, shown only on the rail's current section (app.css; 2026-11-14) -#}
+{%- if name == "home" -%}
+  <path class="icon-fill" d="M5 9.5 12 3.8 19 9.5V21H5z"/>
+  <path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/>
+{%- elif name == "receipt" -%}
+  <path class="icon-fill" d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6"/><path d="M9 12h6"/><path d="M9 16h3"/>
+{%- elif name == "wallet" -%}
+  <rect class="icon-fill" x="3" y="6" width="18" height="14" rx="2"/>
+  <path d="M6 6l10-3 1 3"/><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M21 11h-4a2 2 0 0 0 0 4h4"/>
+{%- elif name == "trend" -%}
+  <path class="icon-fill" d="M3 17l6-6 4 4 8-8V20H3z"/>
+  <path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>
+{%- elif name == "bars" -%}
+  {#- Analysis section (2026-10-25): three bars on a baseline -#}
+  <rect class="icon-fill" x="5.5" y="11" width="3" height="5" rx="1"/><rect class="icon-fill" x="10.5" y="6" width="3" height="10" rx="1"/>
+  <rect class="icon-fill" x="15.5" y="8" width="3" height="8" rx="1"/>
+  <path d="M4 20h16"/><path d="M7 16v-5"/><path d="M12 16V6"/><path d="M17 16v-8"/>
+{%- elif name == "calendar" -%}
+  <rect class="icon-fill" x="3" y="5" width="18" height="16" rx="2"/>
+  <rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/>
+{%- elif name == "gear" -%}
+  {#- Settings (Budgets' settings popup, 2026-10-28): an eight-tooth gear outline (teeth r 10, root r 7.4) and its hub -#}
+  <path d="M9.65 4.98L10.09 2.18H13.91L14.35 4.98L15.3 5.38L17.59 3.71L20.29 6.41L18.62 8.7L19.02 9.65L21.82 10.09V13.91L19.02 14.35L18.62 15.3L20.29 17.59L17.59 20.29L15.3 18.62L14.35 19.02L13.91 21.82H10.09L9.65 19.02L8.7 18.62L6.41 20.29L3.71 17.59L5.38 15.3L4.98 14.35L2.18 13.91V10.09L4.98 9.65L5.38 8.7L3.71 6.41L6.41 3.71L8.7 5.38Z"/>
+  <circle cx="12" cy="12" r="3"/>
+{%- elif name == "manual" -%}
+  {#- a transaction you added by hand (2026-11-04): a page with a pencil across its corner -#}
+  <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M8 9h4"/><path d="M8 13h3"/>
+  <path d="M18.5 2.5a1.6 1.6 0 0 1 2.3 2.3L13 12.6l-3 .7.7-3z"/>
+{%- elif name == "more" -%}
+  {#- more controls (Categories / Account types rows on a phone, 2026-11-11): three dots, vertical (user's request) -#}
+  <circle cx="12" cy="5" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="12" cy="19" r="1.2"/>
+{%- elif name == "plus" -%}
+  {#- add (the Tags page's new tag, 2026-10-29) -#}
+  <path d="M12 5v14"/><path d="M5 12h14"/>
+{%- elif name == "sliders" -%}
+  <circle class="icon-fill" cx="15" cy="6" r="2"/><circle class="icon-fill" cx="9" cy="12" r="2"/>
+  <circle class="icon-fill" cx="17" cy="18" r="2"/>
+  <path d="M4 6h9"/><path d="M17 6h3"/><circle cx="15" cy="6" r="2"/>
+  <path d="M4 12h3"/><path d="M11 12h9"/><circle cx="9" cy="12" r="2"/>
+  <path d="M4 18h11"/><path d="M19 18h1"/><circle cx="17" cy="18" r="2"/>
+{%- elif name == "moon" -%}
+  {#- light / dark switch (2026-10-28) -#}
+  <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>
+{%- elif name == "sync" -%}
+  <path d="M20 12a8 8 0 0 1-13.7 5.6"/><path d="M4 12a8 8 0 0 1 13.7-5.6"/>
+  <path d="M18 2.5v4h-4"/><path d="M6 21.5v-4h4"/>
+{%- elif name == "clock" -%}
+  <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+{%- elif name == "transfer" -%}
+  <path d="M4 8h14"/><path d="M14 4l4 4-4 4"/><path d="M20 16H6"/><path d="M10 12l-4 4 4 4"/>
+{%- elif name == "not-counted" -%}
+  {#- an eye with a slash (user's choice 2026-10-08): left out of the totals -#}
+  <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/>
+{%- elif name == "repeat" -%}
+  {#- part of a confirmed recurring item (user's request 2026-10-16): two arrows going round -#}
+  <path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>
+{%- elif name == "flag" -%}
+  {#- removed by the bank, waiting for your review (user's request 2026-10-22) -#}
+  <path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/>
+{%- elif name == "gift" -%}
+  {#- a reward bonus on a transaction (user's request 2026-10-26) -#}
+  <rect x="4" y="9" width="16" height="11" rx="1"/><path d="M3 9h18M12 9v11"/><path d="M12 9c-2-4-6-4-6-1.5S9.5 9 12 9c2.5 0 6-.5 6-3S14 5 12 9z"/>
+{%- elif name == "rule" -%}
+  <path d="M13 3L4 14h7l-1 7 9-11h-7z"/>
+{%- elif name == "chevron" -%}
+  <path d="M15 6l-6 6 6 6"/>
+{%- elif name == "layout-compact" -%}
+  {#- Net worth's Compact cards (user's requests 2026-10-13): collapse, filled arrows pointing in, inside a box -#}
+  <rect x="1.5" y="4" width="21" height="16" rx="2.5"/>
+  <path d="M5 12h3"/><path d="M7.5 8.5 11 12l-3.5 3.5z" fill="currentColor"/>
+  <path d="M19 12h-3"/><path d="M16.5 8.5 13 12l3.5 3.5z" fill="currentColor"/>
+{%- elif name == "layout-detailed" -%}
+  {#- Detailed cards (twice as wide): expand, filled arrows pointing out, inside a box -#}
+  <rect x="1.5" y="4" width="21" height="16" rx="2.5"/>
+  <path d="M11 12H8"/><path d="M8.5 8.5 5 12l3.5 3.5z" fill="currentColor"/>
+  <path d="M13 12h3"/><path d="M15.5 8.5 19 12l-3.5 3.5z" fill="currentColor"/>
+{%- elif name == "unlink" -%}
+  {#- Remove a transfer match (Transfers; 2026-10-26): two chain links pulled apart -#}
+  <path d="M9 15l-1.5 1.5a3 3 0 0 1-4.2-4.2L6 9.6a3 3 0 0 1 4.2 0"/><path d="M15 9l1.5-1.5a3 3 0 0 1 4.2 4.2L18 14.4a3 3 0 0 1-4.2 0"/><path d="M4 4l3 3"/><path d="M20 20l-3-3"/>
+{%- elif name == "trash" -%}
+  {#- Delete (Categories; 2026-10-25): a lidded bin with two slats -#}
+  <path d="M4 7h16"/><path d="M9.5 7V4.5h5V7"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v5"/><path d="M14 11v5"/>
+{%- elif name == "up-down" -%}
+  {#- Move to (2026-11-02): an arrow up beside an arrow down -#}
+  <path d="M8 20V4"/><path d="M4 8l4-4 4 4"/><path d="M16 4v16"/><path d="M12 16l4 4 4-4"/>
+{%- elif name == "pencil" -%}
+  {#- Edit (Rules; 2026-10-25): a slanted pencil with its tip at the lower left -#}
+  <path d="M15 5l4 4L8.5 19.5 4 20l.5-4.5z"/><path d="M13 7l4 4"/>
+{%- endif -%}
+</svg>
+{%- endmacro %}
+
+{# A category's icon (category_icons.py, user's request 2026-10-20): the library's drawing in the same 24x24 stroke
+   style. `name` comes from category_icons (never user text); unknown names draw the "tag" icon. Decorative. #}
+{% macro category_icon(name, size=14) -%}
+{%- set drawn = CATEGORY_ICONS.get(name) or CATEGORY_ICONS["tag"] -%}
+<svg class="icon" viewBox="0 0 24 24" width="{{ size }}" height="{{ size }}" fill="none" stroke="currentColor"
+     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+{{- drawn.svg | safe -}}
+</svg>
+{%- endmacro %}
+
+{# A small status icon with a tooltip and a screen-reader label (transaction rows, milestone 14). #}
+{% macro badge(name, label, tooltip="") -%}
+<span class="txn-icon" role="img" aria-label="{{ label }}" title="{{ tooltip or label }}">{{ icon(name) }}</span>
+{%- endmacro %}

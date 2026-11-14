@@ -1,0 +1,33 @@
+{# Chart macros (M13). Usage:
+     {% from "_charts.html" import chart as viz %}   (named viz: some pages already have a `chart` variable)
+     {{ viz("nw-trend", "area", data, size="medium", label="Net worth over time") }}
+   charts.js draws it and adds the "Show data" table. Data is JSON that is never
+   executed (type=application/json), so the strict CSP holds. Extra data-* options
+   (e.g. value_label="Projected") become data-value-label="Projected". #}
+{% macro chart(id, kind, data, size="", label="") -%}
+<div class="chart-box{{ ' ' ~ size if size }}">
+  <canvas id="{{ id }}" data-chart="{{ kind }}" data-source="{{ id }}-data" role="img" aria-label="{{ label }}"
+    {#- extra keyword arguments arrive in Jinja's built-in `kwargs` -#}
+    {%- for key, value in kwargs.items() %} data-{{ key | replace('_', '-') }}="{{ value }}"{% endfor %}></canvas>
+</div>
+<script type="application/json" id="{{ id }}-data">{{ data | tojson }}</script>
+{%- endmacro %}
+
+{# A range button's text: the full label, and a short one that phones show instead ("90 days" -> "90D",
+   "1 week" -> "1W"; app.css .seg-long / .seg-short). #}
+{% macro seg_label(label) -%}
+<span class="seg-long">{{ label }}</span><span class="seg-short" aria-hidden="true">{{ label | replace(' days', 'D') | replace(' day', 'D') | replace(' weeks', 'W') | replace(' week', 'W') | replace(' years', 'Y') | replace(' year', 'Y') }}</span>
+{%- endmacro %}
+
+{# 90 / 180 / 365-day buttons for an "area" chart. `options` (objects with key, label,
+   chart_days, default; e.g. performance.ranges()) replaces them with named ranges: the key
+   is remembered and matched by other elements (data-range-show), chart_days sizes the chart. #}
+{% macro ranges(for_id, choices=(90, 180, 365), default=90, options=None) -%}
+<div class="seg" data-range-for="{{ for_id }}" role="group" aria-label="Time range">
+  {%- if options %}
+    {%- for r in options %}<button type="button" data-days="{{ r.chart_days }}" data-range="{{ r.key }}" aria-pressed="{{ 'true' if r.default else 'false' }}" aria-label="{{ r.label }}">{{ seg_label(r.label) }}</button>{% endfor -%}
+  {%- else %}
+    {%- for d in choices %}<button type="button" data-days="{{ d }}" aria-pressed="{{ 'true' if d == default else 'false' }}" aria-label="{{ d }} days">{{ seg_label(d ~ ' days') }}</button>{% endfor -%}
+  {%- endif %}
+</div>
+{%- endmacro %}

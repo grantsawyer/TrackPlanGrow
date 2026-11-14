@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}{{ row.name if row else 'New scenario' }} · Track Plan Grow{% endblock %}
+{% block content %}
+<div class="page-head">
+  <a class="small muted" href="/projection{% if row %}?scenario={{ row.id }}{% endif %}">← Projection</a>
+</div>
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+<p class="muted">A scenario adjusts the projection's inputs and is compared side by side with your baseline.
+  It never changes your real data. Fill in only what you want to change.</p>
+
+<form method="post" action="/projection/scenarios" class="card stacked-form wide">
+  <input type="hidden" name="scenario_id" value="{{ row.id if row else '' }}">
+  <label>Name <input name="name" value="{{ row.name if row else '' }}" placeholder="e.g. Cook at home more" required></label>
+
+  <h2>Change spending in a category</h2>
+  <p class="muted small">Monthly change: negative to spend less (e.g. −200), positive to spend more. A cut can't exceed your
+    average spending in that category.</p>
+  {% for r in category_rows %}{% set i = loop.index0 %}
+    <div class="inline-form">
+      <select name="cat_key_{{ i }}" aria-label="Category">
+        <option value="">— category —</option>
+        {% for c in categories %}<option value="{{ c.key }}" {% if r.category == c.key %}selected{% endif %}>{{ c | category_option }}
+          {%- if averages.get(c.key) %} (avg {{ averages[c.key] | money }}/mo){% endif %}</option>{% endfor %}
+      </select>
+      <input name="cat_amount_{{ i }}" size="10" inputmode="decimal" placeholder="−200" aria-label="Monthly change"
+        value="{{ '%.2f' | format(r.monthly_cents / 100) if r.monthly_cents is defined else '' }}">
+    </div>
+  {% endfor %}
+
+  <h2>New recurring expense or income</h2>
+  <p class="muted small">Monthly amount: positive for a new expense (e.g. a car lease), negative for new income (e.g. a side job).</p>
+  {% for r in recurring_rows %}{% set i = loop.index0 %}
+    <div class="inline-form">
+      <input name="rec_name_{{ i }}" placeholder="name" value="{{ r.name or '' }}" aria-label="Name">
+      <input name="rec_amount_{{ i }}" size="10" inputmode="decimal" placeholder="450" aria-label="Monthly amount"
+        value="{{ '%.2f' | format(r.monthly_cents / 100) if r.monthly_cents is defined else '' }}">
+    </div>
+  {% endfor %}
+
+  <h2>Savings and returns</h2>
+  <div class="inline-form">
+    <label>Savings rate <input name="savings_rate_pct" size="5" value="{{ adj.savings_rate_pct if adj.savings_rate_pct is defined else '' }}">% of income</label>
+    <label>Investment return <input name="investment_return_pct" size="5" value="{{ adj.investment_return_pct if adj.investment_return_pct is defined else '' }}">% per year</label>
+  </div>
+  <p class="muted small">Savings rate replaces your baseline monthly savings with that share of your average income; category and
+    recurring changes then apply on top.</p>
+
+  <h2>Extra loan payments</h2>
+  {% if loans %}
+    <p class="muted small">Paid from savings each month until the loan is paid off.</p>
+    {% for r in extra_rows %}{% set i = loop.index0 %}
+      <div class="inline-form">
+        <select name="extra_acc_{{ i }}" aria-label="Loan">
+          <option value="">— loan —</option>
+          {% for o in loans %}<option value="{{ o.account_id }}" {% if r.account_id == o.account_id %}selected{% endif %}>{{ o.name }}</option>{% endfor %}
+        </select>
+        <input name="extra_amount_{{ i }}" size="10" inputmode="decimal" placeholder="200" aria-label="Extra per month"
+          value="{{ '%.2f' | format(r.monthly_cents / 100) if r.monthly_cents is defined else '' }}">
+      </div>
+    {% endfor %}
+  {% else %}
+    <p class="muted small">No loans with a rate and payment yet. Add them on the Projection page to model extra payments.</p>
+  {% endif %}
+
+  <div class="actions spaced"><button type="submit">Save and compare</button></div>
+</form>
+{% endblock %}

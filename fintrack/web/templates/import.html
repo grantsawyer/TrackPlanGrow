@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Import · Track Plan Grow{% endblock %}
+{# Import (Settings section; docs/import-plan.md phase 2, web/imports.py): a bank's file into an account. The form posts
+   itself to /import/preview on every change (htmx; the file goes along each time and is never kept), the preview fills
+   #import-preview inside the form, and Import submits the same form to /import/apply. Past imports below, each with
+   Undo (behind a details, like other destructive actions). Phones: a note only (importing is on the Mac). #}
+{% block content %}
+{% if msg %}<p class="flash ok" role="status">{{ msg }}</p>{% endif %}
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+
+{% if phone %}
+<section class="card"><p class="muted">Import files on the Mac.</p></section>
+{% else %}
+<section class="card">
+  <h2>Import a file</h2>
+  <form id="import-form" method="post" action="/import/apply" enctype="multipart/form-data"
+        hx-post="/import/preview" hx-trigger="change" hx-target="#import-preview" hx-encoding="multipart/form-data"
+        hx-indicator="#import-preview">
+    <div class="import-pick">
+      <label>Account
+        <select name="account" required>
+          <option value="">Choose…</option>
+          {% for a in accounts %}
+          <option value="{{ a.id }}" {% if a.id == account_id %}selected{% endif %}>{{ a.institution_name }} · {{ a.name }}{% if a.mask %} ····{{ a.mask }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>File <input type="file" name="file" accept=".csv,.tsv,.txt,.xlsx,.ofx,.qfx,.qbo,.qif,text/csv" required></label>
+      <a class="small" href="/manual/new">New manual account</a>
+    </div>
+    <div id="import-preview" class="import-preview" aria-live="polite">{% if preview %}{% include "_import_preview.html" %}{% endif %}</div>
+  </form>
+</section>
+{% endif %}
+
+{% if batches %}
+<section class="card">
+  <h2>Past imports</h2>
+  <div class="table-wrap">
+    <table class="data compact import-batches row-cards">
+      <thead><tr><th>Imported</th><th>Account</th><th>File</th><th>Dates</th><th class="num">Rows</th><th></th></tr></thead>
+      <tbody>
+      {% for b in batches %}
+        <tr{% if b.undone_at %} class="muted"{% endif %}>
+          <td class="rc-sub">{{ b.created_at | localtime }}</td>
+          <td class="rc-main"><a href="/accounts/{{ b.account_id }}">{{ b.account_name }}</a>{% if b.account_mask %} <span class="muted small">····{{ b.account_mask }}</span>{% endif %}</td>
+          <td class="rc-sub">{{ b.file_name }}{% if b.kind != 'transactions' %} <span class="muted small">{{ 'holdings' if b.kind == 'positions' else 'activity' }}</span>{% endif %}</td>
+          <td class="rc-sub">{{ b.date_from | date_label }} – {{ b.date_to | date_label }}</td>
+          <td class="num rc-amt">{{ b.rows_added }}</td>
+          <td class="rc-tool">
+            {% if b.undone_at %}<span class="small">Undone</span>
+            {% elif not phone %}
+            <details class="import-undo">
+              <summary>Undo</summary>
+              <form method="post" action="/import/{{ b.id }}/undo" class="inline-form">
+                <button type="submit" class="danger">Remove {{ b.rows_added }} transaction{{ '' if b.rows_added == 1 else 's' }}</button>
+              </form>
+            </details>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

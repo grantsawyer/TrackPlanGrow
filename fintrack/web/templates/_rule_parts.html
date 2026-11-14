@@ -1,0 +1,15 @@
+{# What the Rules page's rows share. #}
+{% from "_icons.html" import icon %}
+{% macro delete_menu(r, n) %}
+{# asks what happens to its results (user's request 2026-11-02); closing the menu is Cancel #}
+<details class="pop-button rule-delete" data-popover>
+  <summary class="icon-delete" title="Delete" aria-label="Delete rule {{ n }}">{{ icon("trash") }}</summary>
+  <form method="post" action="/rules/{{ r.id }}/delete" class="pop-panel rule-delete-panel">
+    <p class="small">Delete this. What about its {{ '{:,}'.format(r.count) }} matching transaction{{ '' if r.count == 1 else 's' }}?</p>
+    <button type="submit" name="results" value="original" class="secondary">Return to original</button>
+    <button type="submit" name="results" value="keep" class="secondary">Keep its results</button>
+    <button type="button" class="link-button muted" data-popover-close>Cancel</button>
+  </form>
+</details>
+{% endmacro %}
+{% macro filter_data(r) %}data-search="{{ (r.conditions + r.actions) | join(' ') | lower }}" data-fields="{{ r.fields | join(' ') }}" data-kinds="{{ r.kinds | join(' ') }}"{% endmacro %}

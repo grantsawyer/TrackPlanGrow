@@ -1,0 +1,39 @@
+{# Shared by a connected investment account's page and its Balances account page (user's request 2026-10-13: the same
+   table on both). Needs `holdings` (performance.account_holdings), `holdings_value`, `holdings_basis`, `any_basis`
+   (web/accounts.holdings_context). #}
+{# Holdings (user's request 2026-10-12; performance.account_holdings): quantity, current price (live quote, else the
+   latest recorded), value, cost basis where the institution reports it. Largest first; sortable like Activity. #}
+<section class="card">
+  <h2>Holdings</h2>
+  {% if holdings %}
+  <div class="table-wrap">
+    <table class="data holdings-account" data-sortable data-sort-col="value" data-sort-dir="desc">
+      <thead><tr>
+        <th aria-sort="none"><button type="button" class="sort" data-sort="name" data-sort-type="text">Holding</button></th>
+        <th class="num" aria-sort="none"><button type="button" class="sort" data-sort="quantity">Quantity</button></th>
+        <th class="num" aria-sort="none"><button type="button" class="sort" data-sort="price">Price</button></th>
+        <th class="num" aria-sort="descending"><button type="button" class="sort" data-sort="value">Value</button></th>
+        <th class="num" aria-sort="none"><button type="button" class="sort" data-sort="basis">Cost basis</button></th>
+      </tr></thead>
+      <tbody>
+      {% for h in holdings %}
+        <tr data-sort-name="{{ h.name }}" data-sort-quantity="{{ h.quantity if h.quantity is not none else '' }}"
+            data-sort-price="{{ h.price if h.price is not none else '' }}" data-sort-value="{{ h.value_cents or '' }}"
+            data-sort-basis="{{ h.cost_basis_cents if h.cost_basis_cents is not none else '' }}">
+          <td>{{ h.name }}{% if h.ticker and h.ticker != h.name %} <span class="muted">{{ h.ticker }}</span>{% endif %}</td>
+          <td class="num">{% if h.quantity is not none %}{{ '{:,.4f}'.format(h.quantity).rstrip('0').rstrip('.') }}{% else %}—{% endif %}</td>
+          <td class="num"{% if h.price is not none %} title="{{ 'Live quote' if h.price_source == 'live' else 'Latest recorded price' }}"{% endif %}>
+            {%- if h.price is not none %}${{ '{:,.2f}'.format(h.price) }}{% else %}—{% endif %}</td>
+          <td class="num">{{ h.value_cents | money if h.value_cents is not none else '—' }}</td>
+          <td class="num">{{ h.cost_basis_cents | money if h.cost_basis_cents is not none else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+      <tfoot><tr><th colspan="3">Total</th><th class="num">{{ holdings_value | money }}</th>
+        <th class="num">{{ holdings_basis | money if any_basis else '—' }}</th></tr></tfoot>
+    </table>
+  </div>
+  {% else %}
+    <p class="muted">No holdings reported for this account.</p>
+  {% endif %}
+</section>

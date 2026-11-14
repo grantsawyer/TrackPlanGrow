@@ -1,0 +1,18 @@
+{# The date range in the ribbon: dropdown (This month ... 365 days, Custom) + From/To, all form="txn-filters", run by
+   ui.js (#tx-range). Shared by Spending and Savings (user's request 2026-10-11); each page has its own plain GET
+   <form id="txn-filters"> and passes `period` (spending.resolve_period) and `ranges` (spending.RANGES). #}
+<div class="tabbar-controls range-controls" id="tx-range">
+  <div class="menu-select" data-menu-select>
+    <input type="hidden" name="range" form="txn-filters" value="{{ period.key }}">
+    <button type="button" class="menu-select-button" aria-haspopup="listbox" aria-expanded="false"
+            aria-controls="range-options" aria-label="Date range: {{ ranges[period.key] }}">{{ ranges[period.key] }}</button>
+    <ul class="menu-select-list" id="range-options" role="listbox" aria-label="Date range" hidden>
+      {% for key, label in ranges.items() %}<li role="option" data-value="{{ key }}" tabindex="-1"
+          aria-selected="{{ 'true' if period.key == key else 'false' }}"
+          {%- if key == 'custom' and period.key != 'custom' %} hidden{% endif %}>{{ label }}</li>{% endfor %}
+    </ul>
+  </div>
+  <label><span class="range-word">From</span> <input type="date" name="from" form="txn-filters" value="{{ period.start }}" aria-label="From date"></label>
+  <label><span class="range-word">To</span> <input type="date" name="to" form="txn-filters" value="{{ period.end }}" aria-label="To date"></label>
+  <noscript><button type="submit" form="txn-filters" class="secondary">Go</button></noscript>
+</div>

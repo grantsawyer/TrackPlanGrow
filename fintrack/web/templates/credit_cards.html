@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% from "_charts.html" import chart as viz %}
+{% from "_icons.html" import icon %}
+{% block title %}Credit cards · Track Plan Grow{% endblock %}
+{# Credit cards (Analysis section, user's request 2026-10-25): a card per credit card with its spending by category over
+   the range in the ribbon (Savings' control, default YTD). Bar chart (`colorbars`; a treemap until 2026-10-26) + table
+   like Spending's By category, coloured by size within each card; the table's swatches match its card's bars. Reward rates you enter (rewards.py; user's
+   request 2026-10-25) add an estimate under the total and a column to the table, which then groups the categories by
+   rate (highest first), and the chart shows a bar per rate instead of per category, each rate one colour on every card
+   (user's requests 2026-10-26: was a treemap; the swatch moves to the rate's heading); they're edited in each card's "Reward rates" section, for a category, a merchant or both
+   (user's request 2026-10-26; the merchant is text a description must contain). #}
+{# points / miles as a whole number, cash back (cents) as money #}
+{% macro earned(unit, n, long=False) -%}
+{%- if unit == 'cash' %}{{ n | money_whole }}{% if long %} cash back{% endif %}
+{%- else %}{{ '{:,}'.format(n) }}{% if long %} {{ unit }}{% endif %}{% endif -%}
+{%- endmacro %}
+{# every reward form returns to the page with the same date range (web/credit_cards.py _back) #}
+{% macro keep_range() -%}
+<input type="hidden" name="range" value="{{ period.key }}"><input type="hidden" name="from" value="{{ period.start }}"><input type="hidden" name="to" value="{{ period.end }}">
+{%- endmacro %}
+{# a table row's category: swatch (its colour in the card's chart), link to exactly its transactions, count. The link
+   takes spending only (kind=expense, as the rows count), the category without its subcategories (only=1; they have
+   rows of their own) and, on a card with rates, the
+   line's search (RewardLine.search: its merchant text, less the other merchant texts; user's request 2026-10-26). A row
+   at a merchant's rate names the merchant too. #}
+{% macro category_cell(c, chart, line, merchant=None, swatch=True, search="") -%}
+{% if swatch %}<span class="swatch {{ chart.slots.get(line.category, 'slot-other') }}" aria-hidden="true"></span>{% endif %}
+{%- if line.category == '_other' %}{{ line.label }}
+{%- else %}<a href="/transactions?range={{ period.key }}&amp;from={{ period.start }}&amp;to={{ period.end }}&amp;account={{ c.account_id }}&amp;category={{ line.category | urlencode }}&amp;only=1&amp;kind=expense{% if search %}&amp;q={{ search | urlencode }}{% endif %}">{{ line.label }}{% if merchant %} · {{ merchant }}{% endif %}</a>{% endif %}
+<span class="muted small">{{ line.count }}</span>
+{%- endmacro %}
+{% macro rate_editor(c) %}
+{% set setup = rewards.get(c.account_id) %}
+<details class="reward-rates">
+  <summary class="small muted">{{ 'Reward rates' if setup else 'Estimate rewards' }}</summary>
+  {% if not setup %}
+  <form method="post" action="/credit-cards/{{ c.account_id }}/rewards" class="inline-form">
+    {{ keep_range() }}
+    <label class="small muted">Earns <select name="unit" aria-label="What {{ c.name }} earns">
+      {% for key, label in units.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+    <label class="small muted">Base rate <input name="base_rate" class="rate-input" inputmode="decimal" value="1" required aria-label="Base rate"></label>
+    <button type="submit" class="secondary">Start</button>
+  </form>
+  {% else %}
+  <table class="data compact rate-table">
+    <tbody>
+      <tr>
+        <td>Everything else</td>
+        <td colspan="2">
+          <form method="post" action="/credit-cards/{{ c.account_id }}/rewards" class="inline-form">
+            {{ keep_range() }}
+            <select name="unit" data-autosubmit aria-label="What {{ c.name }} earns">
+              {% for key, label in units.items() %}<option value="{{ key }}" {% if setup.unit == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+            <input name="base_rate" class="rate-input" inputmode="decimal" value="{{ rate_label(setup.unit, setup.base_rate_x100)[:-1] }}" required aria-label="Base rate" data-autosubmit>
+            <noscript><button type="submit" class="secondary">Save</button></noscript>
+          </form>
+        </td>
+      </tr>
+      {% for r in setup.rates %}
+      {% set target = (category_labels.get(r.category, r.category) if r.category else 'Any category') ~ (' · ' ~ r.merchant if r.merchant else '') %}
+      <tr>
+        <td>{{ target }}</td>
+        <td class="num">{{ rate_label(setup.unit, r.rate_x100) }}</td>
+        <td class="num">
+          <form method="post" action="/credit-cards/{{ c.account_id }}/rates/delete">
+            {{ keep_range() }}<input type="hidden" name="rate_id" value="{{ r.id }}">
+            <button type="submit" class="icon-delete" title="Remove this rate" aria-label="Remove the {{ target }} rate">{{ icon("trash") }}</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" action="/credit-cards/{{ c.account_id }}/rates" class="inline-form add-rate">
+    {{ keep_range() }}
+    <select name="category" aria-label="Category">
+      <option value="">Any category</option>
+      {% for cat in categories if cat.kind == 'expense' or (cat.parent_key and parent_kinds.get(cat.parent_key) == 'expense') %}<option value="{{ cat.key }}">{{ cat | category_option }}</option>{% endfor %}
+    </select>
+    <input name="merchant" class="merchant-input" maxlength="100" placeholder="Any merchant" aria-label="Merchant (description contains)" title="Description contains">
+    <input name="rate" class="rate-input" inputmode="decimal" required placeholder="{{ '3%' if setup.unit == 'cash' else '3x' }}" aria-label="Rate">
+    <button type="submit" class="secondary">Add rate</button>
+  </form>
+  <form method="post" action="/credit-cards/{{ c.account_id }}/rewards/delete" class="stop-rewards">
+    {{ keep_range() }}<button type="submit" class="link-button small">Stop estimating</button>
+  </form>
+  {% endif %}
+</details>
+{% endmacro %}
+{% block tabbar_controls %}{% include "_range_controls.html" %}{% endblock %}
+{% block content %}
+<form id="txn-filters" class="form-anchor" method="get" action="{{ page_path }}"></form>
+{% if msg %}<p class="flash ok" role="status">{{ msg }}</p>{% endif %}
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+{% if not cards %}
+<section class="card"><p class="muted">No credit cards connected.</p></section>
+{% else %}
+{#- phone-swipe: on a phone the cards are one row you swipe through (app.css; user's request 2026-11-06) -#}
+<div class="grid-2 phone-swipe" data-keep-scroll>
+{% for c in cards %}
+{% set chart = charts[c.account_id] %}
+{% set est = estimates.get(c.account_id) %}
+<section class="card">
+  {# its figures, styled like the Net worth page's cards (user's requests 2026-10-26): each a big value with its label
+     under it. Left, under its name: the rewards balance, linked to the card's page where it's entered: now (the latest
+     you entered + rewards since), else the latest as entered, with its date. Right: spent in the range, and under it
+     the range's rewards estimate with its rate on the spending (rewards per dollar, a point or mile counted as 1¢, so
+     1x = 1%; none without spending) #}
+  {% set bal = reward_balances.get(c.account_id) %}
+  <div class="card-head card-measures">
+    <div class="measure-col">
+      <h2><a href="/accounts/{{ c.account_id }}">{{ c.name }}</a>{% if c.mask %} <span class="muted small">····{{ c.mask }}</span>{% endif %}</h2>
+      {% if bal %}
+      {% set b = bal.current.latest if bal.current else bal.entered %}
+      <div class="measure">
+        <a class="measure-value" href="/accounts/{{ c.account_id }}#reward-balances"
+           {%- if bal.current %} title="Your {{ b.as_of | date_label }} balance + rewards on transactions since"{% endif %}>
+          {{- earned(b.unit, bal.current.total if bal.current else b.amount) }}</a>
+        <span class="kpi-label">{{ units[b.unit] }} Available{% if not bal.current %}, {{ b.as_of | date_label }}{% endif %}</span>
+      </div>
+      {% endif %}
+    </div>
+    <div class="measure-col end">
+      <div class="measure">
+        <span class="measure-value">{{ c.spending_cents | money_whole }}</span>
+        <span class="kpi-label">Spent</span>
+      </div>
+      {% if est %}
+      <div class="measure" title="Estimated from your reward rates{% if c.spending_cents > 0 %}; the % counts a {{ est.unit[:-1] if est.unit != 'cash' else 'dollar' }} as {{ '1¢' if est.unit != 'cash' else '$1' }}{% endif %}">
+        <span class="measure-value">{{ earned(est.unit, est.total) }}
+          {%- if c.spending_cents > 0 %} <span class="measure-pct">({{ '%.1f' | format(est.total * 100 / c.spending_cents) }}%)</span>{% endif %}</span>
+        <span class="kpi-label">{{ units[est.unit] }} Earned</span>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {# what its rewards paid for in the range (user's requests 2026-11-03 / 04; rewards.RedeemedSummary): the rebates' and
+     credits' value, its share of the card's cost (spending, which they lowered, + that value) and what each point was
+     worth; then cash rewards
+     (money in filed as income, e.g. a cash sign-up bonus), which never came off the balance #}
+  {% set red = redeemed.get(c.account_id) %}
+  {% if red %}
+  <div class="measure-row redeemed-row">
+    {% if red.count %}
+    {% set share = red.share_of(c.spending_cents) %}
+    <div class="measure" title="{{ earned(red.unit, red.amount, long=True) }} redeemed{% if share is not none %}; {{ '%.0f' | format(share * 100) }}% of {{ (c.spending_cents + red.value_cents) | money_whole }} (spent + paid with rewards){% endif %}">
+      <span class="measure-value">{{ red.value_cents | money_whole }}
+        {%- if share is not none %} <span class="measure-pct">({{ '%.0f' | format(share * 100) }}%)</span>{% endif %}</span>
+      <span class="kpi-label">Redeemed{% if red.cents_per_point is not none %} · {{ '%.2f' | format(red.cents_per_point) }}¢ each{% endif %}</span>
+    </div>
+    {% endif %}
+    {% if red.cash_rewards_cents %}
+    <div class="measure">
+      <span class="measure-value">{{ red.cash_rewards_cents | money_whole }}</span>
+      <span class="kpi-label">Cash rewards</span>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if c.spending_cents <= 0 %}{# a card with rates has $0 bars for them: no chart then either #}
+    <p class="muted">No spending in this range.</p>
+  {% else %}
+  {{ viz("cc-" ~ c.account_id, "colorbars", chart, size="cardbars", label=c.name ~ (" spending by reward rate" if est else " spending by category"), no_table="1") }}
+  {% endif %}
+  {# a card with reward rates lists them all, even with no spending; one without shows its categories, if any #}
+  {% if est or chart.slices %}
+  <div class="table-wrap">
+    <table class="data breakdown compact card-table">
+      <thead><tr><th>Category</th><th class="num">Spent</th>{% if est %}<th class="num">{{ units[est.unit] }}</th>{% endif %}</tr></thead>
+      {% if est %}
+      {# grouped by rate, highest first; every category listed (an "Other" row could mix rates). A group starts collapsed;
+         clicking its row shows its categories (user's request 2026-10-26; ui.js data-toggle-row / data-toggle-group). #}
+      {% for g in est.groups %}
+      {% set key = 'card-' ~ c.account_id ~ '-' ~ loop.index %}
+      <tbody>
+        <tr class="group toggle-row" data-toggle-row>
+          <th scope="rowgroup"><span class="swatch {{ chart.slots.get('rate-' ~ g.rate_x100, 'slot-other') }}" aria-hidden="true"></span><button type="button" class="link-button expander" data-toggle-group="{{ key }}" aria-expanded="false">{{ rate_label(est.unit, g.rate_x100) }}{% if g.definitions %} <span class="rate-for">({{ g.definitions | join(", ") }})</span>{% endif %}</button></th>
+          <th class="num">{{ g.spending_cents | money_whole }}</th>
+          <th class="num">{{ earned(est.unit, g.earned) }}</th>
+        </tr>
+        {% for line in g.lines %}
+        <tr class="rate-line more" data-group="{{ key }}">
+          <td>{{ category_cell(c, chart, line, line.merchant, swatch=False, search=line.search) }}</td>
+          <td class="num">{{ line.amount_cents | money_whole }}</td>
+          <td class="num muted">{{ earned(est.unit, line.earned) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      {% endfor %}
+      {% if est.bonuses %}
+      {# bonuses you added to single transactions (user's request 2026-10-26): no spending of their own #}
+      {% set key = 'card-' ~ c.account_id ~ '-bonuses' %}
+      <tbody>
+        <tr class="group toggle-row" data-toggle-row>
+          <th scope="rowgroup"><span class="swatch swatch-blank" aria-hidden="true"></span><button type="button" class="link-button expander" data-toggle-group="{{ key }}" aria-expanded="false">Bonuses</button></th>
+          <th></th>
+          <th class="num">{{ earned(est.unit, est.bonus_total) }}</th>
+        </tr>
+        {% for b in est.bonuses %}
+        <tr class="rate-line more" data-group="{{ key }}">
+          <td>{% if b.transaction_id %}<a href="/transactions?range=custom&amp;from={{ b.date }}&amp;to={{ b.date }}&amp;account={{ c.account_id }}&amp;q={{ ('"' ~ b.description | replace('"', '') ~ '"') | urlencode }}">{{ b.description }}</a>
+            {%- else %}<a href="/accounts/{{ c.account_id }}#bonus-points">{{ b.description }}</a>{% endif %}
+            <span class="muted small">{{ b.date | date_label }}</span></td>
+          <td></td>
+          <td class="num muted">{{ earned(est.unit, b.amount) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      {% endif %}
+      {% else %}
+      <tbody>
+      {% for line in rows[c.account_id] %}
+        <tr>
+          <td>{{ category_cell(c, chart, line) }}</td>
+          <td class="num">{{ line.amount_cents | money_whole }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+      {% endif %}
+    </table>
+  </div>
+  {% endif %}
+  {{ rate_editor(c) }}
+</section>
+{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

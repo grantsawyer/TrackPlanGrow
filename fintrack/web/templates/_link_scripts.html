@@ -1,0 +1,3 @@
+{# Plaid requires loading Link from its CDN (self-hosting is not allowed). #}
+<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js" defer></script>
+<script src="{{ url_for('static', path='link.js') }}" defer></script>

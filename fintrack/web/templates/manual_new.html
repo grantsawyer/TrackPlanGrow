@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Add manual account · Track Plan Grow{% endblock %}
+{% block content %}
+<p class="muted">For things Plaid can't see: a car, your home, a 401(k) at an unsupported provider, cash.
+  It's included in net worth and history. Update its value whenever you like.</p>
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+
+<form method="post" action="/manual" class="card stacked-form">
+  <label>Name <input name="name" value="{{ form.name }}" placeholder="e.g. Car, Home, Old 401(k)" required></label>
+  <label>What is it?
+    <select name="kind" required>
+      {% for key, kind in kinds.items() %}
+        <option value="{{ key }}" {% if form.kind == key %}selected{% endif %}>{{ kind.label }}{% if kind.classification == 'liability' %} (owed){% endif %}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Value <input name="value" value="{{ form.value }}" inputmode="decimal" placeholder="18,500" required>
+    <span class="muted small">For a loan or other liability, enter how much you owe.</span></label>
+  <label>As of <input type="date" name="date" value="{{ form.date or today }}" max="{{ today }}" required></label>
+  <label>Note <input name="note" value="{{ form.note }}" placeholder="optional, e.g. Kelley Blue Book estimate"></label>
+  <div class="actions">
+    <button type="submit">Add account</button>
+    <a class="button secondary" href="/setup">Cancel</a>
+  </div>
+</form>
+{% endblock %}

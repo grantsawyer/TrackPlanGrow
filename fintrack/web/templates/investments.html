@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% from "_charts.html" import chart as viz, ranges %}
+{% from "_icons.html" import icon %}
+{% block title %}Investments · Track Plan Grow{% endblock %}
+{# Page controls in the ribbon, top right (user's request 2026-10-07): the range buttons drive the
+   chart, the performance cards and the Investments table. charts.js finds them by data-range-for. #}
+{% block tabbar_controls %}
+<div class="tabbar-controls">{{ ranges("inv-trend", options=perf_ranges) }}</div>
+{% endblock %}
+{% block content %}
+{% macro pct(value) -%}
+  {%- if value is none %}<span class="muted">—</span>
+  {%- else %}<span class="{{ 'delta-up' if value >= 0 else 'delta-down' }}">{{ '▲' if value >= 0 else '▼' }} {{ '%.1f' | format((value * 100) | abs) }}%</span>{% endif -%}
+{%- endmacro %}
+
+{# ---- Performance: your stocks vs three benchmarks (performance.py). Each tile holds one value
+     per chart range; the ribbon's range buttons show the matching one (charts.js). A benchmark tile
+     is a toggle: it draws that benchmark as a second line on the chart (charts.js, one at a time). ---- #}
+<section class="kpis one-row perf-tiles">
+  {% for m in metrics %}
+  {% if m.symbol and perf_chart.mine %}
+  <div class="tile tile-toggle" role="button" tabindex="0" aria-pressed="false"
+       data-compare-for="inv-trend" data-compare="{{ m.symbol }}" title="Show {{ m.label }} on the chart">
+  {% else %}
+  <div class="tile">
+  {% endif %}
+    {#- phones (user's request 2026-11-06): one line each, the symbol for the name (its title has it whole), 90D, 1D -#}
+    <div class="kpi-label" title="{{ m.label }}{% if m.symbol %} {{ m.symbol }}{% endif %}"><span class="w-long">{{ m.label }}{% if m.symbol %} <span class="muted small">{{ m.symbol }}</span>{% endif %}</span><span class="w-short">{{ m.symbol or 'Yours' }}</span></div>
+    {% for r in perf_ranges %}{% set p = m.periods[r.key] %}
+    <div data-range-of="inv-trend" data-range-show="{{ r.key }}" {% if not r.default %}hidden{% endif %}>
+      <div class="tile-value">{{ pct(p.change) }}</div>
+      <div class="kpi-sub muted small">
+        {%- if p.change is none %}no history yet
+        {%- elif p.since > p.start %}since {{ p.since | date_label }}
+        {%- else %}<span class="w-long">{{ r.label }}</span><span class="w-short">{{ r.label | replace(' days', 'D') | replace(' day', 'D') }}</span>{% endif -%}
+      </div>
+    </div>
+    {% endfor %}
+    <div class="kpi-sub small"><span class="w-long">today</span><span class="w-short">1D</span> {{ pct(m.today) }}</div>
+  </div>
+  {% endfor %}
+</section>
+
+{# ---- Performance: % change over the range (user's request 2026-10-07; was account value). "Your
+     stocks" = your current holdings, value-weighted (ends at the Your stocks card's figure); benchmark
+     cards and table rows add their own % line. Built in the browser from daily prices (charts.js). ---- #}
+<section class="card">
+  <div class="card-head">
+    <div class="card-title">
+      <h2>Performance</h2>
+      <span class="muted small">
+        {%- if prices_as_of %}as of {{ prices_as_of | epoch_localtime }}
+        {%- elif last_synced %}as of {{ last_synced | localtime }}{% else %}not synced yet{% endif -%}
+      </span>
+    </div>
+  </div>
+  {% if not perf_chart.mine %}
+    <p class="muted">No priced holdings yet.</p>
+  {% else %}
+    {{ viz("inv-trend", "performance", perf_chart, size="medium", label="% change of your stocks over time") }}
+  {% endif %}
+</section>
+
+{# ---- Investments table (performance.holding_rows: every non-cash holding): follows the chart's range buttons like the cards;
+     sortable by any column (ui.js), default % change highest first. Each row carries a sort
+     value per range (data-sort-pct-90 ...); the table re-sorts when the range changes. ---- #}
+{% set default_range = (perf_ranges | selectattr('default') | first).key %}
+{# Two tabs (user's request 2026-11-04; ui.js [data-card-tabs], ?tab= picks the first): your holdings, and your watchlist
+   (watchlist.py, performance.watch_rows) in the same table without Quantity and Value, whose rows add their line to the
+   chart too, with tickers you add below it. #}
+<section class="card" data-card-tabs>
+  <div class="card-head card-tabs" role="tablist" aria-label="Investments or watchlist">
+    <button type="button" role="tab" data-tab="investments" aria-selected="{{ 'true' if tab == 'investments' else 'false' }}">Investments</button>
+    <button type="button" role="tab" data-tab="watchlist" aria-selected="{{ 'true' if tab == 'watchlist' else 'false' }}">Watchlist</button>
+    {# + at the card's top right, on the Watchlist tab (data-tab-only), opens the search (user's request 2026-11-04): a ticker
+       or a company, its matches as you type in a list that scrolls (watchlist.search over Alpaca's stock list stored here),
+       each a one-click Watch; or type a ticker and Watch. An outside click or Escape closes it (ui.js [data-popover]). #}
+    <details class="pop-button watch-pop" data-popover data-tab-only="watchlist" {% if tab != 'watchlist' %}hidden{% endif %}>
+      <summary class="button secondary icon-button" aria-label="Add to your watchlist" title="Add to your watchlist">{{ icon("plus") }}</summary>
+      <div class="pop-panel watch-panel">
+        <form method="post" action="/investments/watchlist" class="inline-form watch-add">
+          <input type="search" name="ticker" required maxlength="40" placeholder="Ticker or company" aria-label="Ticker or company to watch"
+                 autocomplete="off" hx-get="/investments/watchlist/search" hx-trigger="input changed delay:250ms, search"
+                 hx-target="#watch-results" hx-swap="innerHTML">
+          <button type="submit" class="secondary">Watch</button>
+        </form>
+        <div id="watch-results" class="watch-results" aria-live="polite"></div>
+      </div>
+    </details>
+  </div>
+  {% if msg %}<p class="flash ok" role="status">{{ msg }}</p>{% endif %}
+  {% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+  <div role="tabpanel" data-tab-panel="investments" {% if tab != 'investments' %}hidden{% endif %}>
+  {% if holding_rows %}
+  <div class="table-wrap">
+    <table class="data inv-holdings" data-sortable data-range-table="inv-trend" data-range="{{ default_range }}"
+           data-sort-col="pct" data-sort-dir="desc">
+      {# phones: the shown columns' widths, the same in both tables (app.css; user's request 2026-11-06) #}
+      <colgroup><col class="c-name"><col class="c-hide"><col class="c-hide"><col class="c-price"><col class="c-hide"><col class="c-day"><col class="c-hide"><col class="c-pct"></colgroup>
+      <thead>
+      {# "N day Period" over the two columns that follow the range buttons (user's requests 2026-10-27). #}
+      <tr class="th-groups"><th colspan="6"></th><th class="th-group" colspan="2">
+        {%- for r in perf_ranges %}<span data-range-of="inv-trend" data-range-show="{{ r.key }}" {% if not r.default %}hidden{% endif %}>{{ r.period_days }} day Period</span>{% endfor -%}
+      </th></tr>
+      <tr>
+        <th aria-sort="none"><button type="button" class="sort" data-sort="name" data-sort-type="text">Name</button></th>
+        <th aria-sort="none"><button type="button" class="sort" data-sort="ticker" data-sort-type="text">Ticker</button></th>
+        <th class="num" aria-sort="none"><button type="button" class="sort" data-sort="quantity">Quantity</button></th>
+        <th class="num" aria-sort="none"><button type="button" class="sort" data-sort="price">Price</button></th>
+        <th class="num" aria-sort="none"><button type="button" class="sort" data-sort="value">Value</button></th>
+        <th class="num" aria-sort="none"><button type="button" class="sort" data-sort="day"
+            title="Change since the previous close">1 day</button></th>
+        <th class="num" aria-sort="none"><button type="button" class="sort" data-sort="usd" data-sort-ranged
+            title="Your shares × the price change over the range">$ change</button></th>
+        <th class="num" aria-sort="descending"><button type="button" class="sort" data-sort="pct" data-sort-ranged>% change</button></th>
+      </tr></thead>
+      <tbody>
+      {% for f in holding_rows %}
+        <tr {% if perf_chart.mine and ('sec:' ~ f.security_id) in compare_series %}data-row-toggle {% endif %}data-sort-name="{{ f.name }}" data-sort-ticker="{{ f.ticker or '' }}"
+            data-sort-quantity="{{ f.quantity if f.quantity is not none else '' }}"
+            data-sort-price="{{ f.price if f.price is not none else '' }}"
+            data-sort-day="{{ f.day_change if f.day_change is not none else '' }}"
+            data-sort-value="{{ f.value_cents if f.value_cents is not none else '' }}"
+            {%- for r in perf_ranges %}{% set change, usd, since = f.periods[r.key] %}
+            data-sort-pct-{{ r.key }}="{{ change if change is not none else '' }}" data-sort-usd-{{ r.key }}="{{ usd if usd is not none else '' }}"
+            {%- endfor %}>
+          {# Click the row (or its name, a toggle button) to draw this holding on the chart (charts.js). #}
+          {% if perf_chart.mine and ('sec:' ~ f.security_id) in compare_series %}
+          {#- phones (user's request 2026-11-06): the ticker as the name, the name in the tooltip (.w-long / .w-short) -#}
+          <td><button type="button" class="link-button row-toggle" data-compare-for="inv-trend"
+                      data-compare="sec:{{ f.security_id }}" aria-pressed="false" title="{{ f.name }}: show on the chart"><span class="w-long">{{ f.name }}</span><span class="w-short">{{ f.ticker or f.name }}</span></button></td>
+          {% else %}
+          <td title="{{ f.name }}"><span class="w-long">{{ f.name }}</span><span class="w-short">{{ f.ticker or f.name }}</span></td>
+          {% endif %}
+          <td class="muted">{{ f.ticker or '—' }}</td>
+          {# Whole shares, halves up (user's request 2026-10-07); sorting uses the exact quantity. #}
+          <td class="num">{{ '{:,}'.format((f.quantity + 0.5) | int) if f.quantity is not none else '—' }}</td>
+          <td class="num">{{ '${:,.2f}'.format(f.price) if f.price is not none else '—' }}</td>
+          {# Value and $ change in whole dollars (user's request 2026-10-07); sorting uses exact cents. #}
+          <td class="num">{{ f.value_cents | money_whole if f.value_cents is not none else '—' }}</td>
+          {# 1 day % change whatever the range, right of Value (user's requests 2026-10-27). #}
+          <td class="num">{{ pct(f.day_change) }}</td>
+          <td class="num">
+            {%- for r in perf_ranges %}{% set change, usd, since = f.periods[r.key] %}
+            <span data-range-of="inv-trend" data-range-show="{{ r.key }}" {% if not r.default %}hidden{% endif %}
+                  {% if since %}title="since {{ since | date_label }}"{% endif %}>
+              {%- if usd is none %}<span class="muted">—</span>
+              {%- else %}<span class="{{ 'delta-up' if usd >= 0 else 'delta-down' }}">{{ '+' if usd >= 0 else '−' }}{{ (usd | abs) | money_whole }}</span>{% endif -%}
+            </span>
+            {%- endfor -%}
+          </td>
+          <td class="num">
+            {%- for r in perf_ranges %}{% set change, usd, since = f.periods[r.key] %}
+            <span data-range-of="inv-trend" data-range-show="{{ r.key }}" {% if not r.default %}hidden{% endif %}
+                  {% if since %}title="since {{ since | date_label }}"{% endif %}>{{ pct(change) }}</span>
+            {%- endfor -%}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="muted">No holdings yet.</p>{% endif %}
+  </div>
+  <div role="tabpanel" data-tab-panel="watchlist" {% if tab != 'watchlist' %}hidden{% endif %}>
+  {% if watch_rows %}
+  <div class="table-wrap">
+    <table class="data inv-watch" data-sortable data-range-table="inv-trend" data-range="{{ default_range }}"
+           data-sort-col="pct" data-sort-dir="desc">
+      <colgroup><col class="c-name"><col class="c-hide"><col class="c-price"><col class="c-day"><col class="c-hide"><col class="c-pct"><col class="c-hide"></colgroup>
+      <thead>
+      <tr class="th-groups"><th colspan="4"></th><th class="th-group" colspan="2">
+        {%- for r in perf_ranges %}<span data-range-of="inv-trend" data-range-show="{{ r.key }}" {% if not r.default %}hidden{% endif %}>{{ r.period_days }} day Period</span>{% endfor -%}
+      </th><th></th></tr>
+      <tr>
+        <th aria-sort="none"><button type="button" class="sort" data-sort="name" data-sort-type="text">Name</button></th>
+        <th aria-sort="none"><button type="button" class="sort" data-sort="ticker" data-sort-type="text">Ticker</button></th>
+        <th class="num" aria-sort="none"><button type="button" class="sort" data-sort="price">Price</button></th>
+        <th class="num" aria-sort="none"><button type="button" class="sort" data-sort="day"
+            title="Change since the previous close">1 day</button></th>
+        <th class="num" aria-sort="none"><button type="button" class="sort" data-sort="usd" data-sort-ranged
+            title="One share's price change over the range">$ change</button></th>
+        <th class="num" aria-sort="descending"><button type="button" class="sort" data-sort="pct" data-sort-ranged>% change</button></th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+      {% for f in watch_rows %}
+        {% set drawable = perf_chart.mine and f.security_id in compare_series %}
+        <tr {% if drawable %}data-row-toggle {% endif %}data-sort-name="{{ f.name }}" data-sort-ticker="{{ f.ticker }}"
+            data-sort-price="{{ f.price if f.price is not none else '' }}"
+            data-sort-day="{{ f.day_change if f.day_change is not none else '' }}"
+            {%- for r in perf_ranges %}{% set change, usd, since = f.periods[r.key] %}
+            data-sort-pct-{{ r.key }}="{{ change if change is not none else '' }}" data-sort-usd-{{ r.key }}="{{ usd if usd is not none else '' }}"
+            {%- endfor %}>
+          {% if drawable %}
+          <td><button type="button" class="link-button row-toggle" data-compare-for="inv-trend"
+                      data-compare="{{ f.security_id }}" aria-pressed="false" title="{{ f.name }}: show on the chart"><span class="w-long">{{ f.name }}</span><span class="w-short">{{ f.ticker or f.name }}</span></button></td>
+          {% else %}
+          <td title="{{ f.name }}"><span class="w-long">{{ f.name }}</span><span class="w-short">{{ f.ticker or f.name }}</span></td>
+          {% endif %}
+          <td class="muted">{{ f.ticker }}</td>
+          <td class="num">{{ '${:,.2f}'.format(f.price) if f.price is not none else '—' }}</td>
+          <td class="num">{{ pct(f.day_change) }}</td>
+          <td class="num">
+            {%- for r in perf_ranges %}{% set change, usd, since = f.periods[r.key] %}
+            <span data-range-of="inv-trend" data-range-show="{{ r.key }}" {% if not r.default %}hidden{% endif %}
+                  {% if since %}title="since {{ since | date_label }}"{% endif %}>
+              {%- if usd is none %}<span class="muted">—</span>
+              {%- else %}<span class="{{ 'delta-up' if usd >= 0 else 'delta-down' }}">{{ '+' if usd >= 0 else '−' }}{{ (usd | abs) | money }}</span>{% endif -%}
+            </span>
+            {%- endfor -%}
+          </td>
+          <td class="num">
+            {%- for r in perf_ranges %}{% set change, usd, since = f.periods[r.key] %}
+            <span data-range-of="inv-trend" data-range-show="{{ r.key }}" {% if not r.default %}hidden{% endif %}
+                  {% if since %}title="since {{ since | date_label }}"{% endif %}>{{ pct(change) }}</span>
+            {%- endfor -%}
+          </td>
+          <td class="num">
+            <form method="post" action="/investments/watchlist/{{ f.ticker }}/delete">
+              <button type="submit" class="icon-delete" title="Stop watching {{ f.ticker }}" aria-label="Stop watching {{ f.ticker }}">{{ icon("trash") }}</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="muted">Nothing on your watchlist yet. Add a ticker or company with +.</p>{% endif %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,49 @@
+{# Posted transactions the bank removed, waiting for your decision (removals.py; user's request 2026-10-22), on their
+   account's page (moved there from Transactions and the Overview the same day, user's request). Each keeps counting,
+   with your category and links, until you decide; its likely return (if found) is not counted meanwhile.
+   Actions post to /transactions/{id}/removal and come back to review_url. #}
+{% macro amount(cents) -%}
+{% if cents < 0 %}+{{ (-cents) | money }}{% else %}{{ cents | money }}{% endif %}
+{%- endmacro %}
+{% macro action(r, value, label, cls="secondary") -%}
+<form method="post" action="/transactions/{{ r.old.id }}/removal" class="inline-form">
+  <input type="hidden" name="action" value="{{ value }}">
+  <input type="hidden" name="return_url" value="{{ review_url }}">
+  <button type="submit" class="{{ cls }}">{{ label }}</button>
+</form>
+{%- endmacro %}
+<section class="card removed-review" id="removed-review">
+  <div class="card-head"><h2>Removed by the bank</h2><span class="muted small">{{ removed | length }} to review</span></div>
+  <div class="table-wrap">
+  <table class="data compact">
+    <thead><tr><th>Removed</th><th>Came back as</th><th class="visually-hidden">Actions</th></tr></thead>
+    <tbody>
+    {% for r in removed %}
+      <tr>
+        <td>
+          <div class="nowrap">{{ r.old.date | date_label }} · <span class="num">{{ amount(r.old.amount_cents) }}</span></div>
+          <div>{{ r.old.description }}</div>
+          <div class="muted small">{{ r.old.category_label }}{% if r.link_name %} · {{ r.link_name }}{% endif %}</div>
+        </td>
+        <td>
+          {% if r.new %}
+            <div class="nowrap">{{ r.new.date | date_label }} · <span class="num">{{ amount(r.new.amount_cents) }}</span></div>
+            <div>{{ r.new.description }}</div>
+            <div class="small">{% for c in r.changes %}<span class="change-chip">{{ c }} changed</span>{% else %}<span class="muted">Same</span>{% endfor %}</div>
+          {% else %}
+            <span class="muted">Not back yet</span>
+          {% endif %}
+        </td>
+        <td>
+          <div class="removed-actions">
+            {% if r.new %}{{ action(r, "use", "Use the returned one", "") }}{{ action(r, "not_same", "Not the same") }}{% endif %}
+            {{ action(r, "keep", "Keep it") }}
+            {{ action(r, "delete", "Delete it", "danger") }}
+          </div>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>

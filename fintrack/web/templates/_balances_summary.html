@@ -1,0 +1,34 @@
+{# Balances' Summary card (user's requests 2026-10-13: was the Accounts card; no drop-down rows): each side (Assets,
+   Liabilities) with its proportion bar and one row per kind of account in the account cards' order, each with a
+   swatch of its segment and its total; no Assets − liabilities row (removed, user's request 2026-10-13). Values and
+   bars all end at the card's right edge. Needs `account_groups` (balances.regroup_by_kind) and `account_bars`. #}
+<section class="card">
+  <div class="card-head">
+    <h2>Summary</h2>
+    <a class="small muted" href="/setup">Manage</a>
+  </div>
+  <div class="table-wrap">
+    <table class="data compact accounts-tree summary-tree">
+      <tbody>
+      {% for side in account_groups %}
+        {% set bar = account_bars[side.classification] %}
+        <tr class="side-row"><th>{{ side.label }}</th><th class="num">{{ side.total_cents | money }}</th></tr>
+        {% if bar %}
+        <tr class="prop-row"><td colspan="2">
+          <span class="prop-bar" role="img" aria-label="{{ side.label }} by kind: {% for s in bar %}{{ s.label }} {{ '%.0f' | format(s.share * 100) }}%{{ ', ' if not loop.last }}{% endfor %}">
+            {%- for s in bar %}<span class="meter-fill prop-seg hue-{{ s.kind }} shade-{{ s.shade }}" data-share="{{ '%.4f' | format(s.share) }}" title="{{ s.label }} {{ '%.0f' | format(s.share * 100) }}%"></span>{% endfor -%}
+          </span>
+        </td></tr>
+        {% endif %}
+        {% for g in side.groups %}
+          <tr class="type-row">
+            <td><span class="prop-swatch hue-{{ bar[loop.index0].kind }} shade-{{ bar[loop.index0].shade }}" aria-hidden="true"></span>{{ g.label }}
+              <span class="muted small">{{ g.rows | length }} account{{ '' if g.rows | length == 1 else 's' }}</span></td>
+            <td class="num">{{ g.total_cents | money }}</td>
+          </tr>
+        {% endfor %}
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>

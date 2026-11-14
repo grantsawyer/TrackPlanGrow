@@ -1,0 +1,31 @@
+{# A credit card's bonus points (user's request 2026-11-03; rewards.bonus_points, migration 0061), under its rewards
+   balance once its rewards are set up: a sign-up bonus paid in points, say. They only add to the balance. (Rewards spent
+   are transactions since 2026-11-04: Add a transaction on Transactions, or Rewards used on a credit's edit panel.) #}
+{% from "_icons.html" import icon %}
+{% macro rewards_amount(unit, n) -%}{{ n | money if unit == 'cash' else '{:,}'.format(n) }}{%- endmacro %}
+<section class="card reward-bonuses" id="bonus-points" data-keep-scroll>
+  <div class="card-head"><h2>Bonus {{ reward_unit if reward_unit != 'cash' else 'cash back' }}</h2></div>
+  {% if reward_bonus_points %}
+  <div class="table-wrap">
+    <table class="data compact">
+      <tbody>
+      {% for b in reward_bonus_points %}
+        <tr>
+          <td class="nowrap">{{ b.date | date_label }}</td>
+          <td>{{ b.note or 'Bonus' }}</td>
+          <td class="num">{{ rewards_amount(b.unit, b.amount) }}</td>
+          <td><form method="post" action="/accounts/{{ account.id }}/bonus-points/{{ b.id }}/delete">
+            <button type="submit" class="icon-delete" title="Delete" aria-label="Delete the {{ b.date | date_label }} bonus">{{ icon("trash") }}</button></form></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  <form method="post" action="/accounts/{{ account.id }}/bonus-points" class="inline-form">
+    <label>Date <input type="date" name="date" value="{{ today_iso }}" max="{{ today_iso }}" required></label>
+    <label>{{ reward_units[reward_unit] }} <input name="amount" inputmode="decimal" required placeholder="{{ '25.00' if reward_unit == 'cash' else '60,000' }}"></label>
+    <label>Note <input name="note" maxlength="120" placeholder="Sign-up bonus"></label>
+    <button type="submit">Add</button>
+  </form>
+</section>

@@ -1,0 +1,23 @@
+{# A section's header cell in the Budgets tables (Month, 1-year, 10-year). `s` is the section. A custom group (user's
+   requests 2026-10-28) shows its name in a box you type in: Enter or leaving the box saves it (data-autosubmit) and
+   the page comes back in place (keep-scroll.js); the arrow beside it still collapses the section. An empty group
+   (no lines, nothing spent) has a × to remove it, while more than `min_groups` remain. #}
+{% if framework == 'custom' and s.key != 'income' %}
+<th scope="rowgroup"><div class="group-head">
+  <button type="button" class="section-toggle" data-collapse="{{ s.key }}" aria-expanded="true"
+          aria-label="Show or hide {{ s.label }}" title="Show or hide"></button>
+  <form method="post" action="/budgets/groups/rename" class="group-name-form">
+    <input type="hidden" name="key" value="{{ s.key }}"><input type="hidden" name="back" value="{{ here }}">
+    <input name="name" class="group-name" value="{{ s.label }}" maxlength="40" required data-autosubmit
+           aria-label="Group name" title="Rename the group">
+  </form>
+  {% if not s.lines and not s.extras and not s.outside and group_count > min_groups %}
+  <form method="post" action="/budgets/groups/remove">
+    <input type="hidden" name="key" value="{{ s.key }}"><input type="hidden" name="back" value="{{ here }}">
+    <button type="submit" class="link-button small" aria-label="Remove the group {{ s.label }}" title="Remove the group">×</button>
+  </form>
+  {% endif %}
+</div></th>
+{% else %}
+<th scope="rowgroup"><button type="button" class="section-toggle" data-collapse="{{ s.key }}" aria-expanded="true">{{ s.label }}</button></th>
+{% endif %}

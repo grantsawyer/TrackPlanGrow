@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% from "_charts.html" import chart as viz, ranges %}
+{% block title %}Portfolio · Track Plan Grow{% endblock %}
+{# Page controls in the ribbon, top right (user's request 2026-10-07): the range buttons drive the
+   chart and the three tiles. charts.js finds them by data-range-for, wherever they are. #}
+{% block tabbar_controls %}
+<div class="tabbar-controls">{{ ranges("port-types", options=type_ranges) }}</div>
+{% endblock %}
+{% block content %}
+{# ---- Total / Retirement / Investment accounts (performance.portfolio_measures): balances, and
+     the market performance of their holdings over the chart's range (the ribbon's buttons switch
+     it, like the Investments cards). ---- #}
+<section class="kpis one-row large">
+  {% for m in measures %}
+  <div class="tile">
+    {#- phones: "Investment" for "Investment accounts" (user's request 2026-11-06) -#}
+    <div class="kpi-label">{% if m.label == 'Investment accounts' %}Investment<span class="w-long"> accounts</span>{% else %}{{ m.label }}{% endif %}</div>
+    <div class="tile-value">{{ m.total_cents | money_whole }}</div>
+    {% for r in type_ranges %}{% set p = m.metric.periods[r.key] %}
+    <div class="kpi-sub small" data-range-of="port-types" data-range-show="{{ r.key }}" {% if not r.default %}hidden{% endif %}>
+      {%- if p.change is none %}<span class="muted">—</span>
+      {%- else %}<span class="{{ 'delta-up' if p.change >= 0 else 'delta-down' }}">{{ '▲' if p.change >= 0 else '▼' }} {{ '%.1f' | format((p.change * 100) | abs) }}%</span>
+        <span class="muted">{% if p.since > p.start %}since {{ p.since | date_label }}{% else %}<span class="w-long">{{ r.label }}</span><span class="w-short">{{ r.label | replace(' days', 'D') | replace(' day', 'D') | replace(' years', 'Y') | replace(' year', 'Y') }}</span>{% endif %}</span>{% endif -%}
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</section>
+
+{# ---- Value over time, stacked by account type (visuals.investments_by_type) ---- #}
+<section class="card">
+  <div class="card-head"><h2>By account type</h2></div>
+  {% if by_type.labels %}
+    {{ viz("port-types", "stackedarea", by_type, size="medium", label="Investment accounts' value over time, by account type") }}
+  {% else %}
+    <p class="muted">History builds from here on: each sync saves a daily snapshot.</p>
+  {% endif %}
+</section>
+
+{# ---- Transfers in and out (shared with Savings) ---- #}
+{% include "_investment_transfers.html" %}
+
+{# ---- Holdings (informational; already included in account balances) ---- #}
+{% if holding_groups %}
+<section class="card">
+  <h2>Investment holdings</h2>
+  <p class="muted small">Already included in the account balances on Net worth; shown for detail only.</p>
+  {# Filters (user's request 2026-10-07; ui.js, data-filter-for): name/ticker text, account, kind.
+     Account rows hide when nothing under them matches; their subtotal follows what's shown. #}
+  {#- data-phone-controls: on a phone these live in the controls panel (ui.js; user's request 2026-11-06) -#}
+  <div class="table-filters" data-phone-controls>
+    <input type="search" data-filter-for="port-holdings" data-filter="text" placeholder="Filter by name or ticker"
+           aria-label="Filter holdings by name or ticker">
+    <select data-filter-for="port-holdings" data-filter="account" aria-label="Account">
+      <option value="">All accounts</option>
+      {% for g in holding_groups %}<option value="{{ g.id }}">{{ g.name }}{% if g.mask %} ····{{ g.mask }}{% endif %}</option>{% endfor %}
+    </select>
+    <select data-filter-for="port-holdings" data-filter="kind" aria-label="Kind of holding">
+      <option value="">All kinds</option>
+      {% for k in holding_kinds %}<option value="{{ k }}">{{ k }}</option>{% endfor %}
+    </select>
+  </div>
+  {# Whole dollars and whole percents (user's request 2026-10-07); account rows in a larger font. #}
+  <div class="table-wrap">
+    {# phones (user's request 2026-11-06): one row a holding, ticker · value · each range's change, the head's labels
+       short (90D), the cost and the cash tag hidden (app.css) #}
+    <table class="data holdings" id="port-holdings" data-filterable>
+      <thead><tr><th>Holding</th><th class="num">Value</th><th class="num">Cost basis</th>
+        {%- for r in table_ranges %}<th class="num"><span class="w-long">{{ r.label }}</span><span class="w-short">{{ r.label | replace(' days', 'D') }}</span></th>{% endfor %}
+        {#- phones: the value last, in line with the accounts' subtotals (app.css; the second column hides there) -#}
+        <th class="num phone-only">Value</th></tr></thead>
+      <tbody>
+      {% for g in holding_groups %}
+        <tr class="group" data-account="{{ g.id }}">
+          <th>{{ g.name }}{% if g.mask %} <span class="muted">····{{ g.mask }}</span>{% endif %}</th>
+          <th class="num" data-subtotal>{{ g.total_cents | money_whole }}</th><th></th>
+          {%- for r in table_ranges %}<th></th>{% endfor %}
+        </tr>
+        {% for h in g.rows %}
+        {% set kind = 'Cash' if h.is_cash else security_groups.get((h.security_type or '') | lower, 'Other') %}
+        <tr data-account="{{ g.id }}" data-kind="{{ kind }}" data-value="{{ h.value_cents or 0 }}"
+            data-search="{{ ((h.name or '') ~ ' ' ~ (h.ticker or '')) | lower }}">
+          {#- phones: the ticker as the name, the name in the tooltip (user's request 2026-11-06) -#}
+          <td title="{{ h.name or h.security_id }}"><span class="w-long">{{ h.name or h.security_id }}{% if h.ticker %} <span class="muted">{{ h.ticker }}</span>{% endif %}</span><span class="w-short">{{ h.ticker or h.name or h.security_id }}</span>
+            {% if h.is_cash %}<span class="tag">cash</span>{% endif %}</td>
+          <td class="num">{{ h.value_cents | money_whole if h.value_cents is not none else '—' }}</td>
+          <td class="num" data-label="cost">{{ h.cost_basis_cents | money_whole if h.cost_basis_cents is not none else '—' }}</td>
+          {%- for r in table_ranges %}{% set change = (changes.get(h.security_id) or {}).get(r.key, (none,))[0] %}
+          <td class="num" data-label="{{ r.label | replace(' days', 'D') }}">
+            {%- if change is none %}<span class="muted">—</span>
+            {%- else %}<span class="{{ 'delta-up' if change >= 0 else 'delta-down' }}">{{ '▲' if change >= 0 else '▼' }} {{ ((change * 100) | abs + 0.5) | int }}%</span>{% endif -%}
+          </td>
+          {%- endfor %}
+          <td class="num phone-only">{{ h.value_cents | money_whole if h.value_cents is not none else '—' }}</td>
+        </tr>
+        {% endfor %}
+      {% endfor %}
+        <tr class="filter-empty" hidden><td colspan="{{ 3 + table_ranges | length }}" class="muted">No holdings match.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

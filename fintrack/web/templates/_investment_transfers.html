@@ -1,0 +1,27 @@
+{# Money moved into and out of investment and retirement accounts by month: the last 12 months on Portfolio, the chosen
+   date range on Savings. Included by Portfolio and
+   Savings; needs `transfers` (visuals.investment_transfers). Bank-side transfers Plaid labels as such: see contributions.py.
+   In and out are two charts, each on its own axis (user's request 2026-10-11). Only Portfolio includes it since
+   2026-10-12 (removed from Savings); `transfers_in_grid` skips the wrapper for a page that places the cards itself. #}
+{% from "_charts.html" import chart as viz %}
+{#- phone-pair + data-mini-charts: on a phone the two cards side by side, small (app.css; user's request 2026-11-06) -#}
+{% if not transfers_in_grid %}<div class="grid-2 phone-pair" data-mini-charts>{% endif %}
+  <section class="card">
+    <div class="card-head"><h2>Transfers in</h2></div>
+    {% if transfers.has_into %}
+      {{ viz("inv-transfers-in", "transfers", transfers, size="short", direction="into",
+             label="Money moved into retirement accounts and other investment accounts each month") }}
+    {% else %}
+      <p class="muted">No transfers into investment or retirement accounts in this period.</p>
+    {% endif %}
+  </section>
+  <section class="card">
+    <div class="card-head"><h2>Transfers out</h2></div>
+    {% if transfers.has_out %}
+      {{ viz("inv-transfers-out", "transfers", transfers, size="short", direction="out",
+             label="Money moved out of retirement accounts and other investment accounts each month") }}
+    {% else %}
+      <p class="muted">No transfers out of investment or retirement accounts in this period.</p>
+    {% endif %}
+  </section>
+{% if not transfers_in_grid %}</div>{% endif %}

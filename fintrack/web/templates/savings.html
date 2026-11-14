@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% from "_charts.html" import chart as viz %}
+{% block title %}Savings · Track Plan Grow{% endblock %}
+{# Date range in the ribbon, top right: Spending's controls (user's request 2026-10-11), default 365 days. It sets the
+   third tile, the table + rate bars (end months count only their days inside the range) and the transfers charts. #}
+{% block tabbar_controls %}{% include "_range_controls.html" %}{% endblock %}
+{% block content %}
+<form id="txn-filters" class="form-anchor" method="get" action="{{ page_path }}"></form>
+{# savings-kpis: on a phone the three on one row, smaller (app.css; user's request 2026-11-06) #}
+<section class="kpis savings-kpis">
+  <div class="tile">
+    {#- phones (user's request 2026-11-06): "This month (Nov)", "Last month (Oct)", "… total" (.w-long / .w-short) -#}
+    <div class="kpi-label"><span class="w-long">This month so far ({{ current.month | month_label('short') }})</span><span class="w-short">This month ({{ (current.month | month_label('short'))[:3] }})</span></div>
+    <div class="tile-value">{% with rate=current.rate %}{% include "_rate.html" %}{% endwith %}</div>
+    <div class="kpi-sub">{{ current.saved_cents | money }} saved</div>
+  </div>
+  <div class="tile">
+    <div class="kpi-label"><span class="w-long">Last full month{% if last_full %} ({{ last_full.month | month_label('short') }}){% endif %}</span><span class="w-short">Last month{% if last_full %} ({{ (last_full.month | month_label('short'))[:3] }}){% endif %}</span></div>
+    <div class="tile-value">{% if last_full %}{% with rate=last_full.rate %}{% include "_rate.html" %}{% endwith %}{% else %}<span class="muted">—</span>{% endif %}</div>
+    <div class="kpi-sub">{% if last_full %}{{ last_full.saved_cents | money }} saved{% else %}No full month yet{% endif %}</div>
+  </div>
+  <div class="tile">
+    <div class="kpi-label">{% if period.key == 'custom' %}{{ period.start | date_label }} – {{ period.end | date_label }}{% else %}{{ ranges[period.key] }}{% endif %}</div>
+    <div class="tile-value">{% with rate=range_rate %}{% include "_rate.html" %}{% endwith %}</div>
+    <div class="kpi-sub">{{ range_saved | money }} <span class="w-long">saved in </span>total</div>
+  </div>
+</section>
+
+{# Savings cards (user's requests 2026-10-12): Retirement savings, Investment savings, Other assets and Net cash. A card
+   whose kind has no amounts in the period is hidden (and its table columns too); Net cash always shows. The rest fill
+   the row: CSS container queries on .savings-cards (its own width, not the window's: the rail can be open or closed)
+   lay them out by count (.n1 ... .n4): all in one row, two per row, or one per row, never 3 + 1; with three cards the
+   middle step is two, then Net cash (always last) full width. #}
+{% macro savings_mix_card(id, title, chart, what) %}
+<section class="card">
+  <div class="card-head"><h2>{{ title }}</h2></div>
+  {# Total first, then the average (user's request 2026-10-12). #}
+  <div class="measure-row">
+    <div class="measure">
+      <span class="measure-value {{ 'delta-down' if chart.saved_cents < 0 else '' }}">{{ chart.saved_cents | money_whole }}</span>
+      <span class="kpi-label">Total</span>
+    </div>
+    <div class="measure">
+      <span class="measure-value">{% with rate=(chart.average / 100 if chart.average is not none else none) %}{% include "_rate.html" %}{% endwith %}</span>
+      <span class="kpi-label">Average</span>
+    </div>
+  </div>
+  {{ viz(id, "sharebars", chart, size="short", label=what) }}
+</section>
+{% endmacro %}
+{# Net savings (user's request 2026-10-12): the first card, sized like the rest; its parts are Retirement, Investment
+   and Net cash; a stack's top = the table's Rate. #}
+{% set shown_cards = [true, show.retirement, show.investment, true] | select | list | length %}
+<div class="savings-cards">
+{#- data-mini-charts: on a phone two small cards a row, their charts without legends (app.css, charts.js mini) -#}
+<div class="cards n{{ shown_cards }}" data-mini-charts>
+{{ savings_mix_card("sv-net-savings", "Net savings", net_savings_chart,
+    "Net savings as a share of total income each month, stacked by where it went: retirement, investment and net cash") }}
+{% if show.retirement %}{{ savings_mix_card("sv-retirement", "Retirement savings", retirement_chart,
+    "Retirement savings as a share of total income each month, stacked by account type") }}{% endif %}
+{% if show.investment %}{{ savings_mix_card("sv-investment", "Investment savings", investment_chart,
+    "Investment account savings as a share of total income each month, stacked by institution") }}{% endif %}
+{{ savings_mix_card("sv-net-cash", "Net cash", net_cash_chart, "Net cash as a share of total income each month") }}
+</div>
+</div>
+
+{# Net savings rate per month (user's request 2026-10-11: replaced the income vs spending columns): the table, full
+   width (the rate bars beside it were removed 2026-10-12, user's request). Columns (user's requests
+   2026-10-11/12; definitions in savings.py, repeated in the headers' titles): whole dollars, each money column but
+   Post-tax / Pre-tax followed by "% inc." = it / (post-tax + pre-tax). Rate = (retirement + investment +
+   net cash) / (post-tax + pre-tax). Columns of a hidden card's kind are left out (`show`), Pre-tax when it's all zero. #}
+{% set money_cols = [
+  ("Spending", "spending_cents", "", true),
+  ("Retirement", "retirement_cents", "Recorded retirement contributions − withdrawals, plus net money moved into retirement accounts", show.retirement),
+  ("Investment", "investment_cents", "Net money moved into other investment accounts (withdrawals count against it)", show.investment),
+  ("Net cash", "net_cash_cents", "Post-tax income − spending − net money moved into investments from the bank − net other transfers out of checking / savings (Zelle, Venmo, untracked accounts; not card payments or moves between your connected accounts); money from investments and money lent are left out", true),
+] | selectattr(3) | list %}
+<section class="card">
+  <h2>Net savings rate</h2>
+  <div class="table-wrap">
+    {# on a phone the table below (months across) is shown instead (app.css) #}
+    <table class="data row-cards rc-cols" id="savings-table">
+      <thead><tr><th>Month</th>
+        <th class="num" title="Income that reached your bank accounts (after tax)">Post-tax</th>
+        {% if show.pretax %}<th class="num" title="Contributions recorded on your manual retirement accounts, plus contributions seen only inside a connected investment account">Pre-tax</th>{% endif %}
+        {% for label, _attr, title, _show in money_cols %}
+        <th class="num"{% if title %} title="{{ title }}"{% endif %}>{{ label }}</th>
+        <th class="num" title="{{ label }} ÷ (Post-tax + Pre-tax)">% inc.</th>
+        {% endfor %}
+        <th class="num" title="(Retirement + Investment + Net cash) ÷ (Post-tax + Pre-tax)">Rate</th></tr></thead>
+      <tbody>
+      {% for m in series | reverse %}
+        <tr>
+          {# a month the range cuts shows the days it counts ("Oct 12–31, 2025") #}
+          <td class="rc-main">{% set d = m.clipped_days %}{% if d %}{{ (m.month | month_label('short'))[:3] }} {{ d[0] }}–{{ d[1] }}, {{ m.month[:4] }}
+            {%- else %}{{ m.month | month_label('short') }}{% endif %}
+            {%- if m.partial %} <span class="muted small">(so far)</span>{% endif %}</td>
+          {% set income = m.total_income_cents %}
+          <td class="num rc-sub" data-label="post-tax">{{ m.income_cents | money_whole }}</td>
+          {% if show.pretax %}<td class="num rc-sub" data-label="pre-tax">{{ m.pretax_cents | money_whole }}</td>{% endif %}
+          {% for label, attr, _title, _show in money_cols %}
+          {% set cents = m | attr(attr) %}
+          <td class="num rc-sub {{ 'delta-down' if cents < 0 and label != 'Spending' else '' }}" data-label="{{ label | lower }}">{{ cents | money_whole }}</td>
+          <td class="num muted rc-hide">{% with rate=(cents / income if income > 0 else none) %}{% include "_rate.html" %}{% endwith %}</td>
+          {% endfor %}
+          <td class="num rc-amt">{% with rate=m.rate %}{% include "_rate.html" %}{% endwith %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {#- Phones (user's request 2026-11-06): the same figures turned on their side, months across (newest first, "Nov '26"),
+      a row per field; the field names stay put as the months scroll sideways (app.css .savings-months). Shown only on a
+      phone; the table above only elsewhere. -#}
+  {% set ms = series | reverse | list %}
+  <div class="table-wrap savings-months phone-block">
+    <table class="data compact">
+      <thead><tr><th><span class="visually-hidden">Field</span></th>
+        {%- for m in ms %}{% set d = m.clipped_days %}
+        <th class="num">{{ (m.month | month_label('short'))[:3] }}{% if d %} {{ d[0] }}–{{ d[1] }}{% endif %} '{{ m.month[2:4] }}
+          {%- if m.partial %}<div class="muted small">so far</div>{% endif %}</th>{% endfor %}</tr></thead>
+      <tbody>
+        <tr><th title="Income that reached your bank accounts (after tax)">Post-tax</th>{% for m in ms %}<td class="num">{{ m.income_cents | money_whole }}</td>{% endfor %}</tr>
+        {% if show.pretax %}<tr><th>Pre-tax</th>{% for m in ms %}<td class="num">{{ m.pretax_cents | money_whole }}</td>{% endfor %}</tr>{% endif %}
+        {% for label, attr, title, _show in money_cols %}
+        <tr><th{% if title %} title="{{ title }}"{% endif %}>{{ label }}</th>
+          {%- for m in ms %}{% set cents = m | attr(attr) %}<td class="num {{ 'delta-down' if cents < 0 and label != 'Spending' else '' }}">{{ cents | money_whole }}</td>{% endfor %}</tr>
+        <tr class="pct-row"><th title="{{ label }} ÷ (Post-tax + Pre-tax)">% inc.</th>
+          {%- for m in ms %}{% set cents = m | attr(attr) %}{% set income = m.total_income_cents %}<td class="num muted">{% with rate=(cents / income if income > 0 else none) %}{% include "_rate.html" %}{% endwith %}</td>{% endfor %}</tr>
+        {% endfor %}
+        <tr class="rate-row"><th title="(Retirement + Investment + Net cash) ÷ (Post-tax + Pre-tax)">Rate</th>{% for m in ms %}<td class="num">{% with rate=m.rate %}{% include "_rate.html" %}{% endwith %}</td>{% endfor %}</tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% endblock %}

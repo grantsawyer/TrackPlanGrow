@@ -1,0 +1,12 @@
+{# Budgets: "+ Add group" while Custom is on and below the cap (user's request 2026-10-28; groups are named in their
+   section headers). First in the main card's toolbar, before "+ Add budget" (user's request 2026-10-28). #}
+{% if framework == 'custom' and group_count < max_groups %}
+<details class="add-budget add-group" data-popover>
+  <summary class="button secondary">+ Add group</summary>
+  <form class="inline-form" method="post" action="/budgets/groups">
+    <input type="hidden" name="back" value="{{ here }}">
+    <input name="name" maxlength="40" required placeholder="Group name" aria-label="New group's name">
+    <button type="submit">Add</button>
+  </form>
+</details>
+{% endif %}

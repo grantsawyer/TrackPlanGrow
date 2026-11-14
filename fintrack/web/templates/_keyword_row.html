@@ -1,0 +1,14 @@
+{# One category keywords row (fintrack/rules.py is_keyword; user's requests 2026-11-02): its keywords separated by dots. The pencil
+   swaps in _keyword_edit.html here; saving swaps this back. #}
+{% from "_icons.html" import icon %}
+{% from "_rule_parts.html" import delete_menu, filter_data %}
+<li class="rule-item" data-rule-id="{{ r.id }}" id="rule-{{ r.id }}" {{ filter_data(r) }}>
+  <span class="keyword-category">{{ r.category }}</span>
+  <span class="rule-lines keyword-list">{% for k in r.keywords %}{% if not loop.first %}<span class="keyword-dot" aria-hidden="true"> · </span>{% endif %}<span class="keyword">{{ k }}</span>{% endfor %}
+    {%- if r.only_in %} <span class="muted small">({{ r.only_in | lower }} only)</span>{% endif %}</span>
+  <span class="rule-count muted small" title="Transactions it matches">{{ '{:,}'.format(r.count) }}</span>
+  <div class="row-actions keyword-controls">
+    <a class="icon-edit" href="/rules/{{ r.id }}/keywords" hx-get="/rules/{{ r.id }}/keywords" hx-target="closest li" hx-swap="outerHTML" title="Edit" aria-label="Edit keywords for {{ r.category }}">{{ icon("pencil") }}</a>
+    {{ delete_menu(r, r.id) }}
+  </div>
+</li>

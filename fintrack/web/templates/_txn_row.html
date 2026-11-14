@@ -1,0 +1,100 @@
+{% from "_icons.html" import badge, category_icon, icon %}
+{% from "_tags.html" import tag_chips %}
+{# One transaction row. Rendered in the list and returned alone after an edit. Clicking the row (or its
+   description, a button for the keyboard) opens the edit panel under it (ui.js; milestone 14).
+   `account_view` (a Balances account page, user's requests 2026-10-13): no select box and no account column; still
+   editable, and ?view=account / view=account keeps every row the edits return in that format. #}
+{#- investment activity (investment_activity.as_transactions, user's request 2026-10-30): its id is negative; edited like
+    the rest since 2026-10-31 (description, category, tags; the panel leaves out what doesn't apply) -#}
+{% set activity = t.id < 0 %}
+{#- `review_row` (the Categories to review card, user's requests 2026-11-01; _category_review.html): the same row, opening
+    the same edit panel (?view=review: a save reloads the page), except the category is a dropdown of every category
+    and its box belongs to the card's bulk bar (form="review-bulk", 2026-11-14); no id, since it can be in the list below
+    too. -#}
+{% if review_row %}<tr class="review-row txn-row" data-edit-url="/transactions/{{ t.id }}/edit?view=review">
+{%- else %}<tr id="txn-{{ t.id }}" class="txn-row" data-edit-url="/transactions/{{ t.id }}/edit{{ '?view=account' if account_view }}">{% endif %}
+  {# Group edit: the box belongs to the bulk bar's form (form="bulk-form"); ui.js counts selections. #}
+  {% if not account_view %}<td class="select-col">{% if not review_row %}<input type="checkbox" class="row-select" name="ids" value="{{ t.id }}" form="bulk-form"
+      aria-label="Select {{ t.description }}">{% else %}<input type="checkbox" class="review-select" name="ids" value="{{ t.id }}" form="review-bulk"
+      aria-label="Select {{ t.description }}">{% endif %}</td>{% endif %}
+  <td class="nowrap">{{ t.date | date_label }}</td>
+  {#- Logo in its own column, left of the description (user's request 2026-10-08): logos.py caches it and /logos
+      serves it. A transfer shows its other side first (where money in came from, where money out went;
+      logos.transfer_logos, user's request 2026-10-20); then the transaction's own logo, the same merchant's logo from
+      another transaction, and else its category's icon (category_icons; it replaced a letter 2026-10-20).
+      Decorative: the description and category name it. -#}
+  {%- set logo = (transfer_logos.get(t.id) if transfer_logos is defined and t.kind == 'transfer')
+                 or (logos_by_url.get(t.logo_url) if t.logo_url)
+                 or (logos_by_merchant.get(t.merchant_entity_id) if t.merchant_entity_id) %}
+  <td class="logo-col">
+    {#- phones (app.css ≤640px; user's design 2026-11-05): the category's icon instead of the logo, naming the category -#}
+    <span class="merchant-logo category-icon phone-cat" title="{{ t.category_label }}">
+      {{- category_icon(category_icon_of.get(t.category) if category_icon_of is defined else none, 16) }}</span>
+    {%- if logo %}<img class="merchant-logo" src="/logos/{{ logo }}" alt="" width="20" height="20" loading="lazy">
+    {%- else %}<span class="merchant-logo category-icon" aria-hidden="true">
+      {{- category_icon(category_icon_of.get(t.category) if category_icon_of is defined else none, 16) }}</span>{% endif -%}
+  </td>
+  <td class="desc-col">
+    {#- Status icons on the description's own line, right after it (user's requests 2026-10-08: icons,
+        not text tags; never on an extra line): pending; matched transfer (implies not counted), else
+        not counted when the kind says so (card payments, own-account moves, loan entries). -#}
+    <button type="button" class="link-button row-open" aria-expanded="false" aria-controls="edit-panel-{{ t.id }}"
+            title="{{ t.description }}{% for g in (tags_of.get(t.id, []) if tags_of is defined else []) %} · {{ g.name }}{% endfor %}">{{ t.description }}</button>
+    {#- investment activity: its ticker, a trade's quantity x price (investment_activity.details; on this line, user's request 2026-11-01) -#}
+    {%- set act = activity_of.get(t.id) if activity and activity_of is defined else none %}
+    {%- if act and act.ticker %} <span class="muted">{{ act.ticker }}</span>{% endif %}
+    {%- if act and act.type in ('buy', 'sell') and act.quantity %} <span class="muted small">{{ '{:,.4f}'.format(act.quantity | abs).rstrip('0').rstrip('.') }} × ${{ '{:,.2f}'.format(act.price or 0) }}</span>{% endif %}
+    {%- if t.pending %}{{ badge("clock", "Pending") }}{% endif %}
+    {#- one you added by hand (manual_transactions.py; user's request 2026-11-04), a rewards pair's lines too -#}
+    {%- if (t.plaid_transaction_id or '').startswith('manual-') %}{{ badge("manual", "Added by you", "Added by you: no bank sent it") }}{% endif %}
+    {#- removed by the bank / its likely return, both waiting for review (removals.py, user's request 2026-10-22) -#}
+    {%- if t.removed_at %}{{ badge("flag", "Removed by the bank", "Removed by the bank: review it on the account's page") }}{% endif %}
+    {%- if t.kind == 'excluded' and t.account_type != 'loan' %}{{ badge("flag", "Not counted until you review", "Not counted until you review: may be a removed transaction that came back") }}
+    {#- matched: with another transaction, or (user's request 2026-10-31) a bank transfer with an investment account's own
+        deposit / withdrawal, and that activity row in turn (transfers.detect_transfers) -#}
+    {%- elif t.is_transfer %}{{ badge("transfer", "Matched transfer", "Matched transfer between your accounts (not counted)") }}
+    {%- elif t.kind == 'transfer' %}{{ badge("not-counted", "Not counted", "Not counted: transfer or card payment") }}
+    {%- elif t.kind == 'excluded' %}{{ badge("not-counted", "Not counted", "Not counted: loan account entry") }}{% endif %}
+    {#- part of a confirmed recurring item (recurring.items_of; user's request 2026-10-16) -#}
+    {%- set rec = recurring_of.get(t.id) if recurring_of is defined else none %}
+    {%- if rec %}{{ badge("repeat", "Recurring", "Recurring: " ~ rec.name) }}{% endif %}
+    {#- a reward bonus you added (rewards.bonus_labels; user's request 2026-10-26) -#}
+    {%- set bonus = bonus_of.get(t.id) if bonus_of is defined else none %}
+    {%- if bonus %}{{ badge("gift", "Reward bonus", "Reward bonus: " ~ bonus) }}{% endif %}
+    {#- your tags (tags.py, user's request 2026-10-28) -#}
+    {{ tag_chips(t.id, tags_of.get(t.id, []) if tags_of is defined else [], with_id=not review_row) }}
+    {#- phones: a calendar icon for a tagged transaction, in place of its chips (user's design 2026-11-05), and its date
+        when the list isn't grouped under dates (sorted another way) -#}
+    {%- set row_tags = tags_of.get(t.id, []) if tags_of is defined else [] %}
+    {%- if row_tags %}<span class="phone-tagged" role="img" aria-label="Tagged: {{ row_tags | map(attribute='name') | join(', ') }}">{{ icon("calendar") }}</span>{% endif %}
+    <span class="phone-date muted small">{{ t.date | date_label }}</span>
+    {#- the bank's own text shows only in the edit panel ("From the bank"; user's request 2026-10-17) #}
+  </td>
+  <td class="cat-col" title="{{ t.category_label }}">
+    {#- Plaid's category is the default, so only a rule or your choice is called out. A long one can be cut off: the hover text has it whole -#}
+    {% if review_row %}<form method="post" action="/transactions/category-review/{{ t.id }}" class="review-pick">
+      <input type="hidden" name="return_url" value="{{ review_return }}">
+      <select name="category" data-autosubmit aria-label="Category for {{ t.description }}">
+        <option value="" selected>{{ t.category_label }}</option>
+        {% for heading, group in categories | by_kind %}<optgroup label="{{ heading }}">{% for c in group %}<option value="{{ c.key }}">{{ c | category_option }}</option>{% endfor %}</optgroup>{% endfor %}
+      </select>
+    </form>
+    {%- else %}{{ t.category_label }}{% endif %}{% if t.category_source == 'rule' %}{{ badge("rule", "Set by a rule", "Category set by a rule") }}{% endif %}{# one set by its recurring item: no badge, the row's repeat icon already says so (user's request 2026-11-03) #}
+  </td>
+  {#- the account's name alone (no "····1234", user's request 2026-10-28); cut short with … on narrow tables (app.css);
+      "(AU)" after it for an authorized user's card -#}
+  {% if not account_view %}<td class="account-col"><span class="account-name" title="{{ t.account_name }}{% if t.account_mask %} ····{{ t.account_mask }}{% endif %}">{{ t.account_name }}</span>
+    {#- an authorized user's card (authorized_users.py, user's request 2026-10-29), outside the name so "…" never hides it -#}
+    {%- if t is authorized_user %} <span class="au-mark" title="Authorized user's card ····{{ t.account_owner }}">(AU)</span>{% endif %}</td>{% endif %}
+  {#- an account page with authorized users' cards: the card each was on, its last 4 without "····" (user's requests 2026-10-29) -#}
+  {% if card_col is defined and card_col %}<td class="nowrap">{% if t is authorized_user %}{{ t.account_owner }} <span class="au-mark">(AU)</span>{% elif t.account_mask %}{{ t.account_mask }}{% endif %}</td>{% endif %}
+  {# Plaid sign: positive = money out. Money in is shown with a "+". #}
+  <td class="num amount-col {{ 'ok' if t.amount_cents < 0 else '' }}">
+    {% if t.amount_cents < 0 %}+{{ (-t.amount_cents) | money }}{% else %}{{ t.amount_cents | money }}{% endif %}
+  </td>
+  {#- a card's page: this transaction's rewards (rewards.transaction_rewards; user's request 2026-10-26); blank when it
+      earns nothing (payments, credits) -#}
+  {% if rewards_col is defined and rewards_col %}{% set earned = rewards_of.get(t.id) %}
+  <td class="num muted">{% if earned is not none %}{{ earned | money if rewards_col == 'cash' else '{:,}'.format(earned) }}{% endif %}</td>
+  {% endif %}
+</tr>

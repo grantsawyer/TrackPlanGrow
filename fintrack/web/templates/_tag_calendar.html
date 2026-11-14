@@ -1,0 +1,57 @@
+{# The Tags calendar's month grid and day dialog, shared by the Tags page and Overview's calendar card. #}
+{# A day: its number, then yours and the holidays (user's requests 2026-11-02; the 1-year view's small grids show a dot, names on
+   hover). Clicking it opens #day-dialog (ui.js) to add a label or remove one of yours. #}
+{% macro day_cell(d) -%}
+{%- if d.hidden %}<span class="cal-day cal-blank" aria-hidden="true"></span>{% else -%}
+{%- set names = d.labels | map(attribute='text') | list %}
+{%- set mine = d.labels | selectattr('kind', 'equalto', 'custom') | list %}
+<button type="button" class="cal-day{{ ' out' if not d.in_month }}{{ ' today' if d.today }}{{ ' has-label' if names }}{{ ' shaded' if d.labels | rejectattr('kind', 'equalto', 'shopping') | list }}" data-cal-day="{{ d.date }}" data-day-title="{{ d.date | date_label }}"
+  data-labels='[{% for l in mine %}{"id": {{ l.id }}, "text": {{ l.text | tojson }}, "yearly": {{ 'true' if l.yearly else 'false' }}}{{ ", " if not loop.last }}{% endfor %}]'
+  title="{{ names | join(' · ') if names else 'Add a label' }}" aria-label="{{ d.date | date_label }}{{ ': ' ~ names | join(', ') if names }}. Add a label">
+  <span class="cal-num">{{ d.day }}</span>
+  {%- for l in d.labels %}<span class="cal-label {{ l.kind }}">{{ l.text }}</span>{% endfor -%}
+</button>
+{%- endif %}
+{%- endmacro %}
+{# A bar's click (user's request 2026-11-02): on the Tags page (`from_overview` off) it scrolls the cards to its tag (ui.js;
+   the anchor without scripts); from Overview it opens the Tags page on this month with that tag's card on top. #}
+{% macro month_grid(c, compact, titled=true, from_overview=false) %}
+<div class="cal{{ ' ' ~ compact if compact }}">
+  {% if compact and titled %}<h3 class="cal-month">{{ (c.month | month_label('short'))[:3] if compact == 'tiny' else c.month | month_label }}</h3>{% endif %}
+  <div class="cal-head" aria-hidden="true">{% for d in (('S', 'M', 'T', 'W', 'T', 'F', 'S') if compact == 'tiny' else ('Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat')) %}<span>{{ d }}</span>{% endfor %}</div>
+  {% for w in c.weeks %}
+  <div class="cal-week">
+    {# today's blue background: the day's whole box, in a layer above the day and below the bars (app.css) #}
+    {%- for d in w.days %}{% if d.today %}<div class="cal-today-layer" aria-hidden="true"><span class="cal-today-box cs-{{ loop.index }}"></span></div>{% endif %}{% endfor %}
+    {#- hidden days have no grid lines either (user's request 2026-11-02): the card's background covers them (app.css) #}
+    {%- if w.blank_lead or w.blank_tail %}<div class="cal-blank-layer" aria-hidden="true">
+      {%- if w.blank_lead %}<span class="cal-blank-cover cs-1 ce-{{ w.blank_lead }}"></span>{% endif %}
+      {%- if w.blank_tail %}<span class="cal-blank-cover tail cs-{{ 8 - w.blank_tail }} ce-7"></span>{% endif %}</div>{% endif %}
+    <div class="cal-days">{% for d in w.days %}{{ day_cell(d) }}{% endfor %}</div>
+    {% for lane in w.lanes %}
+    <div class="cal-lane">
+      {%- for b in lane %}<a class="cal-bar {{ b.slot }} cs-{{ b.start }} ce-{{ b.end }}{{ ' open-start' if not b.starts }}{{ ' open-end' if not b.ends }}{{ ' loose' if b.run.loose }}"{% if b.summary.tag.color %} data-tag-color="{{ b.summary.tag.color }}"{% endif %}
+         href="{{ '/tags?month=' ~ c.month ~ '&focus=' ~ b.summary.tag.id if from_overview else '#tag-card-' ~ b.summary.tag.id }}" data-focus-tag="{{ b.summary.tag.id }}"
+         title="{{ b.summary.tag.name }}: {{ b.run.first | date_label }}{% if b.run.last != b.run.first %} – {{ b.run.last | date_label }}{% endif %}{% if b.run.loose %} (outside its dates){% endif %} · {{ b.summary.spent_cents | money_whole }} spent">{{ b.summary.tag.name }}</a>{% endfor -%}
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endmacro %}
+{# `back`: "overview" returns there after adding or removing a label; blank = the Tags page. #}
+{% macro day_dialog(month, view='', back='') %}
+<dialog id="day-dialog" class="scope-dialog day-dialog" aria-labelledby="day-dialog-title">
+  <h2 id="day-dialog-title" data-day-dialog-title></h2>
+  <ul class="day-labels" data-day-list></ul>
+  <form method="post" action="/tags/labels" data-day-form>
+    <input type="hidden" name="date"><input type="hidden" name="month" value="{{ month }}"><input type="hidden" name="view" value="{{ view }}"><input type="hidden" name="back" value="{{ back }}">
+    <label class="edit-field"><span>Label</span><input name="label" maxlength="40" required autocomplete="off"></label>
+    <label class="inline-check"><input type="checkbox" name="yearly" value="1"> Every year</label>
+    <div class="actions">
+      <button type="submit">Add</button>
+      <button type="button" class="secondary" data-day-cancel>Cancel</button>
+    </div>
+  </form>
+</dialog>
+{% endmacro %}

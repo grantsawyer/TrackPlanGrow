@@ -1,0 +1,402 @@
+{% extends "base.html" %}
+{% from "_charts.html" import chart as viz %}
+{% from "_icons.html" import icon, badge %}
+{% block title %}Transactions · Track Plan Grow{% endblock %}
+{# ---- Date range, always in the ribbon (user's request 2026-10-08; replaced the month list, then a
+     button toggle): a dropdown of the presets + From/To. A preset fills From/To with the dates it
+     applies; editing a date switches the dropdown to Custom (ui.js), which is listed only then. All three belong to the filter form (form="txn-filters"), so they keep the other
+     filters and the sort; ui.js submits on change (they're outside the form, and this block is
+     replaced on every update via hx-select-oob, so listeners on it would be lost). A blank date =
+     no limit on that side. Old ?month= links (Budgets, Spending) open as Custom with that month. ---- #}
+{% block tabbar_controls %}
+<div class="tabbar-controls range-controls" id="tx-range">
+  {# A custom dropdown, not a <select>: macOS opens native menus with the selected option under the
+     pointer, so lower choices opened upward; this list always opens below (user's request). ui.js
+     [data-menu-select] runs it (mouse + keyboard) and writes the hidden "range" input. #}
+  <div class="menu-select" data-menu-select>
+    <input type="hidden" name="range" form="txn-filters" value="{{ filters.range }}">
+    <button type="button" class="menu-select-button" aria-haspopup="listbox" aria-expanded="false"
+            aria-controls="range-options" aria-label="Date range: {{ ranges[filters.range] }}">{{ ranges[filters.range] }}</button>
+    <ul class="menu-select-list" id="range-options" role="listbox" aria-label="Date range" hidden>
+      {# Custom is listed only while a date you entered is in use (ui.js shows it when you edit one). #}
+      {% for key, label in ranges.items() %}<li role="option" data-value="{{ key }}" tabindex="-1"
+          aria-selected="{{ 'true' if filters.range == key else 'false' }}"
+          {%- if key == 'custom' and filters.range != 'custom' %} hidden{% endif %}>{{ label }}</li>{% endfor %}
+    </ul>
+  </div>
+  <label><span class="range-word">From</span> <input type="date" name="from" form="txn-filters" value="{{ filters['from'] or data_first }}" aria-label="From date"></label>
+  <label><span class="range-word">To</span> <input type="date" name="to" form="txn-filters" value="{{ filters.to or data_last }}" aria-label="To date"></label>
+  <noscript><button type="submit" form="txn-filters" class="secondary">Go</button></noscript>
+</div>
+{# + Add a transaction by hand (user's request 2026-11-04; manual_transactions.py), outside #tx-range, which each update
+   replaces. Cash, or a Rewards redemption: its rewards points used (on a card whose rewards are set up) add its rebate,
+   the same amount back in the same category, so the category nets to zero and its tags count the cost. #}
+<details class="pop-button add-txn" data-popover>
+  <summary class="button secondary icon-button" aria-label="Add a transaction" title="Add a transaction">{{ icon("plus") }}</summary>
+  <form method="post" action="/transactions/new" class="pop-panel manual-form" data-rule-row>
+    {# its type (user's request 2026-11-04): a Rewards redemption shows the rewards used (ui.js's row switch) #}
+    <fieldset class="kind-toggle wide">
+      <legend class="visually-hidden">Type</legend>
+      <label><input type="radio" name="type" value="cash" data-rule-kind checked><span>Cash</span></label>
+      <label><input type="radio" name="type" value="redemption" data-rule-kind><span>Rewards redemption</span></label>
+    </fieldset>
+    <label>Date <input type="date" name="date" value="{{ today_iso }}" max="{{ today_iso }}" required></label>
+    <label>Account
+      <select name="account" required>{% for a in add_accounts %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select></label>
+    <label class="wide">Description <input name="description" maxlength="120" required placeholder="Flight to Denver"></label>
+    <label>Amount <input name="amount" inputmode="decimal" required placeholder="750.00"></label>
+    <label>Money
+      <select name="direction"><option value="out">out</option><option value="in">in</option></select></label>
+    <label class="wide">Category
+      <select name="category" required>
+        <option value="">Choose…</option>
+        {% for heading, group in categories | by_kind %}<optgroup label="{{ heading }}">{% for c in group %}<option value="{{ c.key }}">{{ c | category_option }}</option>{% endfor %}</optgroup>{% endfor %}
+      </select></label>
+    <label class="wide">Tags <input name="tags" list="manual-tag-names" placeholder="Comma-separated"></label>
+    <fieldset data-for="redemption" class="wide" hidden disabled>
+      <label>Rewards points used <input name="rewards" inputmode="decimal" required placeholder="50,000"></label>
+    </fieldset>
+    <button type="submit">Add</button>
+    <datalist id="manual-tag-names">{% for g in all_tags %}<option value="{{ g.name }}">{% endfor %}</datalist>
+  </form>
+</details>
+{% endblock %}
+{% block content %}
+{# Plain GET form: works without JS. With HTMX, results refresh as you type/choose. #}
+{# data-phone-controls: on a phone ui.js moves the filters into the controls panel the Transactions tab opens (user's
+   request 2026-11-06; docs/ui.md Phones) #}
+<form id="txn-filters" class="filters" data-phone-controls method="get" action="/transactions"
+      hx-get="/transactions" hx-target="#results" hx-select="#results" hx-select-oob="#tx-range" hx-swap="outerHTML"
+      hx-push-url="true" hx-trigger="change, keyup changed delay:300ms from:#filter-q, submit">
+  {# All / Income / Spending / Transfers, across the page above the other filters (user's request 2026-10-30; replaced
+     the Kind dropdown): radio buttons in the form, so a pick refreshes the list like any filter. Transfers includes loan
+     account entries; a link's kind=excluded (just those) shows Transfers picked. #}
+  <fieldset class="kind-toggle">
+    <legend class="visually-hidden">Show</legend>
+    {% for value, label in kinds.items() %}
+    <label><input type="radio" name="kind" value="{{ value }}" {% if filters.kind == value or (value == 'transfer' and filters.kind == 'excluded') %}checked{% endif %}><span>{{ label }}</span></label>
+    {% endfor %}
+  </fieldset>
+  {# Search: words match description, merchant, category or account; amounts like 42.50, >100, <20
+     match money in or out (milestone 14). #}
+  <input id="filter-q" type="search" name="q" value="{{ filters.q }}" placeholder="Search text or amount (42.50, >100)" aria-label="Search">
+  {# Accounts: a checklist (user's request 2026-10-29), any number checked, none = all, grouped by account type
+     (user's request 2026-10-30; web/transaction_filters.py _account_groups): a type's box ticks all its accounts (all credit
+     cards at once). An account with authorized users' cards (authorized_users.py) has its cards under it: Primary and
+     each AU card. A box shows partly ticked when only some below it are (ui.js [data-checklist], any depth). Each change
+     refreshes the list (the form's HTMX trigger); the button names what's picked, joined (data-checklist-join). #}
+  <details class="checklist" data-popover data-checklist data-checklist-join>
+    <summary class="menu-select-button" aria-label="Accounts" title="{{ accounts_label }}" data-checklist-label>{{ accounts_label }}</summary>
+    <div class="checklist-panel">
+      <label class="check-row check-all"><input type="checkbox" data-check-all {% if not picked_accounts %}checked{% endif %}> All accounts</label>
+      {% for g in account_groups %}
+      <label class="check-row check-group"><input type="checkbox" data-parent="{{ g.key }}" data-label="{{ g.name }}" {% if g.picked %}checked{% endif %}> {{ g.name }}</label>
+      {% for a in g.accounts %}
+      {% set cards = account_cards.get(a.id, []) %}
+      {% set whole = a.id | string in picked_accounts %}
+      <label class="check-row check-child"><input type="checkbox" name="account" value="{{ a.id }}" data-label="{{ a.name }}"
+        data-child-of="{{ g.key }}" {% if cards %}data-parent="{{ a.id }}"{% endif %} {% if whole %}checked{% endif %}> {{ a.name }}{% if a.mask %} <span class="muted">····{{ a.mask }}</span>{% endif %}</label>
+      {% for c in cards %}
+      <label class="check-row check-child check-grandchild"><input type="checkbox" name="account" value="{{ c.value }}" data-child-of="{{ a.id }}"
+        data-label="{{ a.name }}{{ ' (AU)' if c.au }}" {% if whole or c.value in picked_accounts %}checked{% endif %}>
+        {{ 'AU' if c.au else 'Primary' }}{% if c.last4 %} <span class="muted">····{{ c.last4 }}</span>{% endif %}</label>
+      {% endfor %}
+      {% endfor %}
+      {% endfor %}
+    </div>
+  </details>
+  {# Categories: a checklist like the accounts' (user's request 2026-10-29), under the main groups (user's request
+     2026-10-30; what they count as: Spending, Transfers, Income; _category_groups): a group's box ticks all its
+     categories. A category with subcategories has them under it, after "No subcategory" (the category itself); ticking
+     the category ticks them all. Values: "<key>", "<key>:self", "<key>:<sub key>" (web/transaction_filters.py
+     _category_filter). The button names the topmost ticked boxes, joined. #}
+  <details class="checklist" data-popover data-checklist data-checklist-all="All categories" data-checklist-join>
+    <summary class="menu-select-button" aria-label="Categories" title="{{ categories_label }}" data-checklist-label>{{ categories_label }}</summary>
+    <div class="checklist-panel">
+      <label class="check-row check-all"><input type="checkbox" data-check-all {% if not picked_categories %}checked{% endif %}> All categories</label>
+      {% for g in category_groups %}
+      <label class="check-row check-group"><input type="checkbox" data-parent="k-{{ g.kind }}" data-label="{{ g.label }}" {% if g.picked %}checked{% endif %}> {{ g.label }}</label>
+      {% for c, subs in g.tree %}
+      {% set whole = c.key in picked_categories %}
+      <label class="check-row check-child"><input type="checkbox" name="category" value="{{ c.key }}" data-label="{{ c.label }}"
+        data-child-of="k-{{ g.kind }}" {% if subs %}data-parent="{{ c.key }}"{% endif %} {% if whole %}checked{% endif %}> {{ c.label }}</label>
+      {% if subs %}
+      <label class="check-row check-child check-grandchild"><input type="checkbox" name="category" value="{{ c.key }}:self" data-child-of="{{ c.key }}"
+        data-label="{{ c.label }}" {% if whole or c.key ~ ':self' in picked_categories %}checked{% endif %}> <span class="muted">No subcategory</span></label>
+      {% for x in subs %}
+      <label class="check-row check-child check-grandchild"><input type="checkbox" name="category" value="{{ c.key }}:{{ x.key }}" data-child-of="{{ c.key }}"
+        data-label="{{ x.label }}" {% if whole or c.key ~ ':' ~ x.key in picked_categories or x.key in picked_categories %}checked{% endif %}> {{ x.label }}</label>
+      {% endfor %}
+      {% endif %}
+      {% endfor %}
+      {% endfor %}
+    </div>
+  </details>
+  {% if all_tags %}
+  {# your tags (tags.py, user's request 2026-10-28): a checklist like the accounts' (2026-10-30), with "No tag" for the
+     transactions without one; none ticked = every transaction #}
+  {% set tag_labels = (['No tag'] if 'none' in picked_tags else []) + all_tags | selectattr('id', 'in', picked_tags | map('int', default=0) | list) | map(attribute='name') | list %}
+  <details class="checklist" data-popover data-checklist data-checklist-all="All tags" data-checklist-many="tags">
+    <summary class="menu-select-button" aria-label="Tags" data-checklist-label>{{ 'All tags' if not tag_labels else tag_labels[0] if tag_labels | length == 1 else tag_labels | length ~ ' tags' }}</summary>
+    <div class="checklist-panel">
+      <label class="check-row check-all"><input type="checkbox" data-check-all {% if not picked_tags %}checked{% endif %}> All tags</label>
+      <label class="check-row"><input type="checkbox" name="tag" value="none" data-label="No tag" {% if 'none' in picked_tags %}checked{% endif %}> <span class="muted">No tag</span></label>
+      {% for g in active_tags %}
+      <label class="check-row"><input type="checkbox" name="tag" value="{{ g.id }}" data-label="{{ g.name }}" {% if g.id | string in picked_tags %}checked{% endif %}> {{ g.name }}</label>
+      {% endfor %}
+      {% if inactive_tags %}
+      <div class="check-heading">Inactive</div>
+      {% for g in inactive_tags %}
+      <label class="check-row"><input type="checkbox" name="tag" value="{{ g.id }}" data-label="{{ g.name }}" {% if g.id | string in picked_tags %}checked{% endif %}> {{ g.name }}</label>
+      {% endfor %}
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+  {# a month or day picked on the Money in and out chart (user's request 2026-10-26): kept while other filters change; its
+     tag clears it, as clicking its bar again does #}
+  {% if filters.period %}<input type="hidden" name="period" value="{{ filters.period }}">
+  <a class="filter-tag small" href="{{ period_clear_url }}" aria-label="Show all dates in the range">{{ filters.period | month_label('short') if filters.period | length == 7 else filters.period | date_label }} <span aria-hidden="true">✕</span></a>{% endif %}
+  {# a flow picked on the Transfer flows chart (user's request 2026-10-31): kept the same way; its tag clears it #}
+  {# a description picked on the list by description (user's request 2026-11-01): kept the same way #}
+  {% if filters.description %}<input type="hidden" name="description" value="{{ filters.description }}">
+  <a class="filter-tag small" href="{{ description_clear_url }}" aria-label="Show every description">{{ filters.description }} <span aria-hidden="true">✕</span></a>{% endif %}
+  {# money in or out only, from a figure in the Summary (user's request 2026-11-01): kept the same way #}
+  {% if filters.money %}<input type="hidden" name="money" value="{{ filters.money }}">
+  <a class="filter-tag small" href="{{ money_clear_url }}" aria-label="Show money in and out">Money {{ filters.money }} <span aria-hidden="true">✕</span></a>{% endif %}
+  {% if filters.flow %}<input type="hidden" name="flow" value="{{ filters.flow }}">
+  <a class="filter-tag small" href="{{ flow_clear_url }}" aria-label="Show every transfer">{{ flow_label }} <span aria-hidden="true">✕</span></a>{% endif %}
+  {# The current sort survives filtering. #}
+  {% if filters.sort %}<input type="hidden" name="sort" value="{{ filters.sort }}">{% endif %}
+  {% if filters.dir %}<input type="hidden" name="dir" value="{{ filters.dir }}">{% endif %}
+  <noscript><button type="submit">Filter</button></noscript>
+  <a class="small muted" href="/transactions">Clear</a>
+</form>
+
+<div id="results">
+  {% if msg %}<p class="flash ok" role="status">{{ msg }}</p>{% endif %}
+  {% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+  {# the filtered transactions' charts (user's requests 2026-10-26): by category on the left, a third of the width, and
+     money in and out over time on the right, two thirds, when the main column is wide enough (app.css .tx-charts);
+     stacked otherwise. By category = spending, or income when that's the kind filtered: a ring of categories with their
+     subcategories outside (visuals.category_rings, charts.js "rings"); its legend is a list beside the rings, never
+     wrapped (a long name ends in …, full in its title), each entry a link like its slice. Clicking a slice or a bar
+     filters the list, again clears it (web/transactions.py toggle) #}
+  {% set show_flow = period.labels | length > 1 or (flows and flows.flows) %}
+  {% set show_rings = rings and (rings.parents or rings.rows) %}
+  {% set show_summary = summary and total %}
+  {% if show_flow or show_rings or show_summary %}
+  <div class="tx-charts-wrap">
+  <div class="tx-charts{{ ' both' if show_flow and (show_rings or show_summary) }}">
+  {% if show_summary %}
+    {#- All: in the pie's place, the list as a balance (user's request 2026-11-11; it replaced a table of in, out and net
+        per group; web/transaction_filters._balance): the net, then what came in and what went out as two bars on one
+        scale - the gap between them is the net - each a segment per group, and a key: each group (its view), its count,
+        its net and its share of its side -#}
+    {%- set b = balance %}
+    {#- money in with a "+" (green); money out a plain amount, no minus (user's request 2026-11-11) -#}
+    {%- macro signed(cents) %}{{ '+' if cents > 0 }}{{ cents | abs | money_whole }}{% endmacro %}
+    <section class="card tx-summary-card tx-balance">
+      <div class="card-head"><h2>Summary</h2>
+        <span class="muted small nowrap">{{ '{:,}'.format(b.count) }} transaction{{ '' if b.count == 1 else 's' }}</span></div>
+      <div class="balance-net">
+        <span class="balance-net-value{{ ' ok' if b.net_cents > 0 }}">{{ signed(b.net_cents) if b.net_cents else '$0' }}</span>
+        <span class="kpi-label">{{ 'Net in' if b.net_cents > 0 else 'Net out' if b.net_cents < 0 else 'Net' }}</span>
+      </div>
+      {#- the five rows (two bars, three in the key) evenly spaced in the card's height (user's request 2026-11-11) -#}
+      <div class="balance-rows">
+      <div class="balance-bars" role="group" aria-label="Came in {{ b.in_cents | money_whole }}{% for g in b.came_in %}, {{ g.label }} {{ g.size_cents | money_whole }}{% endfor %}. Went out {{ b.out_cents | money_whole }}{% for g in b.went_out %}, {{ g.label }} {{ g.size_cents | money_whole }}{% endfor %}.">
+        {#- each segment opens its group's view; a bar's total, what moved money that way (user's request 2026-11-11) -#}
+        {% for side, segs, cents, url in [('in', b.came_in, b.in_cents, b.in_url), ('out', b.went_out, -b.out_cents, b.out_url)] %}
+        <div class="balance-row">
+          <span class="balance-track">{% for g in segs %}<a class="meter-fill balance-seg seg-{{ g.kind }}" href="{{ g.url }}" data-share="{{ '%.4f' | format(g.share) }}" title="{{ g.label }}: {{ signed(g.net_cents) }}" aria-label="{{ g.label }}: {{ signed(g.net_cents) }}"></a>{% endfor %}
+            {%- if b.gap_on == side %}<span class="meter-fill balance-seg balance-gap" data-share="{{ '%.4f' | format(b.gap_share) }}" title="Net: {{ signed(b.net_cents) }}"></span>{% endif %}</span>
+          <span class="balance-total{{ ' ok' if cents > 0 }}">{% if cents %}<a href="{{ url }}" title="Every transaction that {{ 'brought money in' if side == 'in' else 'took money out' }}">{{ signed(cents) }}</a>{% else %}$0{% endif %}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <ul class="balance-key">
+        {% for g in b.key %}
+        <li>
+          <span class="balance-dot seg-{{ g.kind }}" aria-hidden="true"></span>
+          <span class="balance-name"><a href="{{ g.url }}">{{ g.label }}</a> <span class="muted small">{{ '{:,}'.format(g.count) }}</span></span>
+          <span class="muted small balance-of">{% if g.of_side is not none %}{{ g.of_side }}% of {{ 'in' if g.net_cents > 0 else 'out' }}{% endif %}</span>
+          <span class="balance-amt{{ ' ok' if g.net_cents > 0 }}"><a href="{{ g.url }}">{{ signed(g.net_cents) if g.net_cents else '$0' }}</a></span>
+        </li>
+        {% endfor %}
+      </ul>
+      </div>
+    </section>
+  {% elif show_rings %}
+    {% set what = 'Income' if filters.kind == 'income' else 'Spending' %}
+    <section class="card">
+      <div class="card-head">
+        {#- the title picks what the card shows (user's requests 2026-11-01; saved, spending.breakdown): the pie by category,
+            or the top descriptions -#}
+        <form method="post" action="/transactions/breakdown-chart" class="card-title-form">
+          <input type="hidden" name="return_url" value="{{ this_url }}">
+          <h2><select name="by" class="title-select" data-autosubmit aria-label="What this card shows">
+            {% for key in ('category', 'description') %}<option value="{{ key }}" {% if breakdown == key %}selected{% endif %}>{{ what }} by {{ key }}</option>{% endfor %}
+          </select></h2>
+        </form>
+        {#- the list's total and transactions, following its filters; kept on this line (user's requests 2026-10-31, 2026-11-01) -#}
+        <span class="muted small nowrap" title="{{ '{:,}'.format(rings.count) }} transaction{{ '' if rings.count == 1 else 's' }}">{{ rings.shown_cents | money_whole }} · {{ '{:,}'.format(rings.count) }}</span>
+      </div>
+      {% if breakdown == 'description' %}
+      {#- the top 10 descriptions (user's request 2026-11-01; visuals.top_descriptions): each one's share of the total, as a
+          number and a bar; clicking one filters the list -#}
+      <ol class="top-list">
+        {% for row in rings.rows %}
+        <li{% if row.lit %} class="picked"{% endif %}>
+          <a href="{{ row.url }}" title="{{ row.label }}: {{ row.cents | money }}">{{ row.label }}</a>
+          <span class="meter full"><span class="meter-fill" data-share="{{ '%.4f' | format(row.share) }}"></span></span>
+          <span class="top-list-pct">{{ row.percent }}%</span>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <div class="rings-layout">
+        {{ viz("tx-categories", "rings", rings, label=what ~ " by " ~ breakdown ~ " for the filtered transactions", value_label=('Received' if what == 'Income' else 'Spent')) }}
+        <ul class="rings-legend small">
+          {% for g in rings.parents %}
+          {#- Other's entry names what's in it; clicking it lists them all (user's request 2026-10-29) -#}
+          <li title="{{ g.label }}{% if g.members %}: {{ g.members | map(attribute='label') | join(', ') }}{% endif %}"{% if rings.dim and g.lit %} class="picked"{% endif %}><span class="swatch {{ g.slot }}" aria-hidden="true"></span>{% if g.url %}<a href="{{ g.url }}">{{ g.label }}</a>{% else %}{{ g.label }}{% endif %}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+    </section>
+  {% endif %}
+  {% if show_flow and chart_view == 'transfers' %}
+    {#- Transfers (user's requests 2026-10-30/31): where the money went between accounts (or, for a transfer with no
+        match, its category); visuals.transfer_flows. The gear picks the chart (saved, transfers.chart_style): a circle
+        (charts.js "chord": each account once, its arc = all it sent and received) or the flow ("sankey": from on the
+        left, to on the right) -#}
+    <section class="card">
+      <div class="card-head">
+        <h2>Transfer flows</h2>
+        <div class="card-head-tools">
+          {#- the chart's total and its transfers, a matched pair once (user's request 2026-10-31) -#}
+          <span class="muted small">{{ flows.total_cents | money_whole }} · {{ '{:,}'.format(flows.count) }} transfer{{ '' if flows.count == 1 else 's' }}</span>
+          <details class="pop-button" data-popover>
+            <summary class="button secondary icon-button" aria-label="Chart settings" title="Chart settings">{{ icon("gear") }}</summary>
+            <form method="post" action="/transactions/transfers-chart" class="pop-panel settings-pop">
+              <input type="hidden" name="return_url" value="{{ this_url }}">
+              <fieldset>
+                <legend>Chart</legend>
+                <label class="radio-row"><input type="radio" name="style" value="circle" data-autosubmit {% if transfers_chart == 'circle' %}checked{% endif %}> Circle</label>
+                <label class="radio-row"><input type="radio" name="style" value="flow" data-autosubmit {% if transfers_chart == 'flow' %}checked{% endif %}> Flow</label>
+              </fieldset>
+            </form>
+          </details>
+        </div>
+      </div>
+      {{ viz("tx-flows", "chord" if transfers_chart == 'circle' else "sankey", flows, size="tall",
+             label="Where the filtered transfers went, between accounts") }}
+    </section>
+  {% elif show_flow and chart_view in ('spending', 'income') %}
+    {#- Spending / Income (user's request 2026-10-30): one total per bar, a dashed line at the average (charts.js "totals") -#}
+    {% set what = 'Income' if chart_view == 'income' else 'Spending' %}
+    <section class="card">
+      <div class="card-head">
+        <h2>{{ what }} over time</h2>
+        {% if totals.average_cents is not none %}<span class="muted small">{{ totals.average_cents | money_whole }} per {{ totals.per }}</span>{% endif %}
+      </div>
+      {{ viz("tx-period", "totals", period, size="short", label=what ~ " over time for the filtered transactions",
+             value_label=('Received' if chart_view == 'income' else 'Spent'), direction=('in' if chart_view == 'income' else 'out')) }}
+    </section>
+  {% elif show_flow %}
+    <section class="card">
+      <div class="card-head">
+        <h2>Money in and out</h2>
+        {#- the average for these transactions over the range (user's request 2026-10-30; _flow_average) -#}
+        {% if flow_average %}<span class="muted small">{{ flow_average.in_cents | money_whole }} in · {{ flow_average.out_cents | money_whole }} out per {{ flow_average.per }}</span>{% endif %}
+      </div>
+      {{ viz("tx-period", "flow", period, size="short", label="Money in and out for the filtered transactions") }}
+    </section>
+  {% endif %}
+  </div>
+  </div>
+  {% endif %}
+  {% include "_category_review.html" %}
+  {% if not rows %}
+    <p class="empty">No transactions match. {% if not filters.values() | select | list %}Connect an institution, then Sync now.{% endif %}</p>
+  {% else %}
+  {# ---- Group edit (milestone 14; ui.js): shown once a row is checked. "Select all N matching"
+       targets every transaction these filters find, on every page (the server re-runs the query). ---- #}
+  <form id="bulk-form" class="bulk-bar" method="post" action="/transactions/bulk-category" data-bulk-total="{{ total }}" hidden>
+    <span class="bulk-count" aria-live="polite">0 selected</span>
+    {% if total > rows | length %}
+      <button type="button" class="link-button" data-bulk-all>Select all {{ total }} matching</button>
+    {% endif %}
+    <input type="hidden" name="all" value="">
+    <input type="hidden" name="return_url" value="{{ this_url }}">
+    {% for key in ('q', 'range', 'account', 'category', 'kind', 'from', 'to', 'period', 'tag', 'flow', 'money', 'description') %}
+      {% if filters[key] %}<input type="hidden" name="{{ key }}" value="{{ filters[key] }}">{% endif %}
+    {% endfor %}
+    <select name="apply_category" aria-label="Category to apply" required>
+      <option value="">Set category…</option>
+      <option value="__auto__">Back to automatic</option>
+      {% for heading, group in categories | by_kind %}<optgroup label="{{ heading }}">{% for c in group %}<option value="{{ c.key }}">{{ c | category_option }}</option>{% endfor %}</optgroup>{% endfor %}
+    </select>
+    <button type="submit">Apply</button>
+    {% if purposes %}
+    {# Link the selected transfers to a purpose account, e.g. money lent (purposes.py; user's request 2026-10-12).
+       Its own action; formnovalidate because the category menu above is required for Apply only. #}
+    <select name="apply_purpose" aria-label="Purpose account to link to">
+      <option value="">Link to purpose…</option>
+      {% for p in purposes %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+      <option value="none">None (unlink)</option>
+    </select>
+    <button type="submit" class="secondary" formaction="/transactions/bulk-purpose" formnovalidate>Link</button>
+    {% endif %}
+    {# Tag the selected transactions, or take a tag off them (tags.py, user's request 2026-10-28); a new name makes a tag. #}
+    <input name="tag_name" list="bulk-tag-names" maxlength="40" placeholder="Tag…" aria-label="Tag to add or remove">
+    <datalist id="bulk-tag-names">{% for g in active_tags %}<option value="{{ g.name }}">{% endfor %}</datalist>
+    <button type="submit" class="secondary" formaction="/transactions/bulk-tag" formnovalidate name="tag_action" value="add">Add tag</button>
+    {% if all_tags %}<button type="submit" class="secondary" formaction="/transactions/bulk-tag" formnovalidate name="tag_action" value="remove">Remove tag</button>{% endif %}
+    <button type="button" class="link-button muted" data-bulk-clear>Clear</button>
+  </form>
+  {# phones: grouped under a heading per date while sorted by date (user's design 2026-11-05; app.css hides the headings
+     on wider screens), the boxes only in Select mode (ui.js [data-select-mode]) #}
+  {% set by_date = sort == 'date' %}
+  <div class="table-wrap txns-wrap txn-columns"{{ ' data-by-date' if by_date }}>
+    <table class="data txns">
+      <thead>
+        {# Headings sort the whole filtered list (server side, so paging stays right); again = reverse. #}
+        <tr>
+          <th class="select-col"><input type="checkbox" data-select-page aria-label="Select all on this page"></th>
+          {% for col, label, cls in [('date', 'Date', 'date-col'), ('description', 'Description', ''), ('category', 'Category', ''),
+                                     ('account', 'Account', ''), ('amount', 'Amount', 'num amount-col')] %}
+          <th class="{{ cls }}" aria-sort="{{ ('ascending' if sort_dir == 'asc' else 'descending') if sort == col else 'none' }}">
+            <a class="sort-link" href="{{ sort_url(col) }}">{{ label }}</a></th>
+          {%- if col == 'date' %}
+          {# Merchant logos (user's request 2026-10-08): no visible heading, not sortable. #}
+          <th class="logo-col"><span class="visually-hidden">Merchant logo</span></th>
+          {%- endif %}
+          {% endfor %}
+          <th class="phone-only select-toggle"><button type="button" class="link-button" data-select-mode aria-pressed="false">Select</button></th>
+        </tr>
+      </thead>
+      <tbody>
+        {# invisible; it holds each column at the width of the whole filtered list's longest value, so sorting or paging
+           doesn't move them (web/transaction_filters._widest; user's request 2026-11-01) #}
+        {% if widest %}<tr class="txn-sizer" aria-hidden="true"><td class="select-col"></td><td>{{ widest.date | date_label }}</td><td class="logo-col"></td><td></td>
+          <td>{{ widest.category }}{{ badge("rule", "", "") }}</td><td class="account-col"><span class="account-name">{{ widest.account }}</span>{% if widest.au %} <span class="au-mark">(AU)</span>{% endif %}</td><td>+{{ widest.amount_cents | money }}</td></tr>{% endif %}
+        {% for t in rows %}
+          {%- if by_date and (loop.first or t.date != loop.previtem.date) %}<tr class="date-head"><th colspan="7" scope="rowgroup">{{ t.date | date_label }}</th></tr>{% endif %}
+          {%- include "_txn_row.html" %}
+        {%- endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if pages > 1 %}
+    <nav class="pager">
+      {% if page > 1 %}<a href="{{ page_url(page - 1) }}">← Newer</a>{% endif %}
+      <span class="muted small">Page {{ page }} of {{ pages }}</span>
+      {% if page < pages %}<a href="{{ page_url(page + 1) }}">Older →</a>{% endif %}
+    </nav>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

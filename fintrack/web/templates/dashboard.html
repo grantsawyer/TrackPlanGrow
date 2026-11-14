@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% from "_charts.html" import chart as viz, ranges %}
+{% from "_balance_chart.html" import projected_balance %}
+{% block title %}Track Plan Grow{% endblock %}
+{% block head_scripts %}{% if broken %}{% include "_link_scripts.html" %}{% endif %}{% endblock %}
+{% block content %}
+{% set has_data = institutions or manual_accounts %}
+{% if not has_data %}
+  <section class="card">
+    <h2>Get started</h2>
+    <p>Connect your first bank to see your net worth, spending, and savings here.
+      You can also <a href="/manual/new">add a manual account</a> for things Plaid can't see.</p>
+    <a class="button" href="/connect">Connect an institution</a>
+  </section>
+{% endif %}
+
+{# ---- Needs attention: broken connections first, so they can't be missed ---- #}
+{% if broken %}
+  <section class="card attention">
+    <h2>Needs attention</h2>
+    <p class="flash bad" id="link-error" hidden></p>
+    {% for item in broken %}
+      <div class="item-error">
+        <strong>{{ item.institution_name or "Unknown institution" }}</strong>
+        <span>{{ "Login required" if item.status == 'login_required' else "Connection error" }}:
+          {{ item.error_message or item.error_code }}</span>
+        {# Update mode repairs this same Item; it never uses another Item. #}
+        <button type="button" data-link-update data-item-id="{{ item.id }}">Reconnect</button>
+      </div>
+    {% endfor %}
+  </section>
+{% endif %}
+
+{% if has_data %}
+<section class="kpis equal">
+  <div class="hero">
+    <div class="kpi-label"><a href="/networth">Net worth</a></div>
+    <div class="hero-value">{{ nw.net_cents | money_whole }}</div>
+    <div class="kpi-sub">
+      {% if change %}
+        {% set up = change.delta_cents >= 0 %}
+        <span class="{{ 'delta-up' if up else 'delta-down' }}">{{ '▲' if up else '▼' }}
+          {{ (change.delta_cents if up else -change.delta_cents) | money }}</span> since {{ change.since_date | date_label }}
+      {% else %}
+        <span class="muted">Change since last month appears after a month of history.</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="tile">
+    <div class="kpi-label"><a href="/spending">Spent this month</a></div>
+    <div class="tile-value">{{ mtd.spending_cents | money_whole }}</div>
+    <div class="kpi-sub">
+      {% set diff = mtd.spending_cents - mtd.last_month_same_period_cents %}
+      {% if mtd.last_month_same_period_cents or mtd.spending_cents %}
+        {# Spending: down is good. #}
+        <span class="{{ 'delta-up' if diff <= 0 else 'delta-down' }}">{{ '▼' if diff <= 0 else '▲' }}
+          {{ (diff if diff > 0 else -diff) | money }}</span>
+        vs {{ mtd.last_month_same_period_cents | money }} in {{ (mtd.last_month | month_label('short'))[:3] }} 1–{{ mtd.last_day }}
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="tile">
+    <div class="kpi-label"><a href="/savings">Savings rate</a></div>
+    <div class="tile-value">{% with rate=this_month.rate %}{% include "_rate.html" %}{% endwith %}</div>
+    <div class="kpi-sub">
+      {# vs the same days of last month, like Spent this month (user's request 2026-10-23); up is good. The gap is in
+         points between the two rounded rates, so it agrees with the figures shown. #}
+      {% set now_rate, then_rate = this_month.rate, mtd.last_month_same_period_rate %}
+      {% if now_rate is not none and then_rate is not none %}
+        {% set pts = ((now_rate * 100) | round(0) - (then_rate * 100) | round(0)) | int %}
+        <span class="{{ 'delta-up' if pts >= 0 else 'delta-down' }}">{{ '▲' if pts >= 0 else '▼' }}
+          {{ pts | abs }} pt{{ '' if pts | abs == 1 else 's' }}</span>
+      {% endif %}
+      vs {% with rate=then_rate %}{% include "_rate.html" %}{% endwith %} in {{ (mtd.last_month | month_label('short'))[:3] }} 1–{{ mtd.last_day }}
+    </div>
+  </div>
+</section>
+
+{# ---- Two independent columns: each card starts right below the one above it
+     (no shared rows). One column below 900px: the left column's cards, then the right's. ---- #}
+<div class="overview-grid" data-overview-order>
+<div class="overview-col">
+{# ---- Net worth over time ---- #}
+<section class="card">
+  {# its range, top right of the card: the only card it changes (user's request 2026-11-06; in the ribbon from 2026-10-23,
+     when 30 days was added). Without ribbon controls the phone shows no tab line on the Overview. #}
+  <div class="card-head">
+    <h2><a href="/networth">Net worth over time</a></h2>
+    {% if nw_trend | length >= 2 %}{{ ranges("ov-nw", (30, 90, 180, 365)) }}{% endif %}
+  </div>
+  {% if nw_trend | length < 2 %}
+    <p class="muted">History starts with your first sync; the chart appears after a second day.</p>
+  {% else %}
+    {% if nw_trend | length < 30 %}<p class="muted small">{{ nw_trend | length }} days of history so far: it fills in with each daily sync.</p>{% endif %}
+    {{ viz("ov-nw", "area", nw_trend, size="short", label="Net worth over time") }}
+  {% endif %}
+</section>
+
+{# moved under Net worth over time on every screen (user's request 2026-11-11); on a phone the cards' order follows #}
+{# ---- Investments (was "Investment movers", renamed 2026-11-04; prices.py): top 5 by % change, the rest behind "Show
+     all". Its title is a dropdown (user's request 2026-11-04): your holdings, or your watchlist (prices.watch_movers: the
+     same table without Value), remembered (app_settings 'overview_movers'). ---- #}
+{% set watching = movers_view == 'watchlist' %}
+{# data-keep-scroll: switching its dropdown reloads the page where you were (user's request 2026-11-04; keep-scroll.js) #}
+<section class="card" data-keep-scroll>
+  <div class="card-head">
+    <form method="post" action="/overview/movers" class="card-title-form">
+      <h2><select name="view" class="title-select" data-autosubmit aria-label="What this card shows">
+        <option value="investments" {% if not watching %}selected{% endif %}>Investments</option>
+        <option value="watchlist" {% if watching %}selected{% endif %}>Watchlist</option>
+      </select></h2>
+      <noscript><button type="submit" class="secondary">Show</button></noscript>
+    </form>
+    <span class="muted small">prices as of {% if movers.fetched_at %}{{ movers.fetched_at | epoch_localtime }}{% elif last_synced %}{{ last_synced | localtime }}{% else %}the last sync{% endif %}</span>
+  </div>
+  {% if watching and not movers.rows %}
+    <p class="muted">Nothing on your watchlist yet. <a href="/investments?tab=watchlist">Add some on Investments</a>.</p>
+  {% elif not movers.rows and not movers.benchmark %}
+    <p class="muted">No stock or fund holdings from Plaid yet.</p>
+  {% else %}
+    <div class="table-wrap">
+      <table class="data compact movers" id="movers-table">
+        <thead><tr><th>{{ 'Ticker' if watching else 'Holding' }}</th><th class="num">Price</th><th class="num">Change</th>{% if not watching %}<th class="num">Value</th>{% endif %}</tr></thead>
+        <tbody>
+        {# The 5 biggest moves (up or down), then SPY as a benchmark (always shown; your value if you hold it), then
+           the rest behind "Show all" (user's request 2026-10-23) #}
+        {% macro mover_row(m, cls="") -%}
+          <tr {% if cls %}class="{{ cls }}"{% endif %}{% if 'more' in cls %} data-group="movers"{% endif %}>
+            <td title="{{ m.name or '' }}">{{ m.ticker or m.name or '—' }}{% if cls == 'benchmark' %} <span class="muted small">benchmark</span>{% endif %}</td>
+            <td class="num">{{ '${:,.2f}'.format(m.price) if m.price is not none else '—' }}</td>
+            <td class="num">
+              {%- if m.change is none %}<span class="muted">—</span>
+              {%- else %}<span class="{{ 'delta-up' if m.change >= 0 else 'delta-down' }}">{{ '▲' if m.change >= 0 else '▼' }} {{ '%.1f' | format((m.change * 100) | abs) }}%</span>{% endif -%}
+            </td>
+            {% if not watching %}<td class="num">{% if m.value_cents is not none %}{{ m.value_cents | money_whole }}{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
+          </tr>
+        {%- endmacro %}
+        {% for m in movers.rows[:5] %}{{ mover_row(m) }}{% endfor %}
+        {% if movers.benchmark %}{{ mover_row(movers.benchmark, "benchmark") }}{% endif %}
+        {% for m in movers.rows[5:] %}{{ mover_row(m, "more") }}{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if movers.rows | length > 5 %}
+      <button type="button" class="link-button expander" data-toggle-group="movers" aria-expanded="false"
+              data-label-closed="Show all {{ movers.rows | length }}" data-label-open="Show fewer">Show all {{ movers.rows | length }}</button>
+    {% endif %}
+  {% endif %}
+</section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2><a href="/budgets">Spending by budget category</a></h2>
+      {% if budget.lines %}<span class="muted small">{{ budget.spent_in_budgets_cents | money_whole }} of {{ budget.budgeted_cents | money_whole }}</span>{% endif %}
+    </div>
+    {% if not budget.lines %}
+      <p class="muted">No budgets yet. <a href="/budgets">Set your budget</a>: click a line for amounts from your last 1, 3, or 6 months.</p>
+    {% else %}
+      {{ viz("ov-budget", "bullet", budget_bars, size="medium", label="Spent, budget, and percent used per category") }}
+    {% endif %}
+  </section>
+
+{# ---- Recent transactions ---- #}
+  <section class="card">
+    <div class="card-head">
+      <h2><a href="/spending">Spending: this month vs last</a></h2>
+      <span class="muted small">running total by day</span>
+    </div>
+    {{ viz("ov-spend", "lines", spend_compare, size="medium", label="Cumulative spending this month and last month") }}
+  </section>
+
+<section class="card">
+  <div class="card-head">
+    <h2><a href="/transactions">Recent transactions</a></h2>
+    <a class="small muted" href="/transactions">All transactions</a>
+  </div>
+  {% if not recent %}
+    <p class="muted">No transactions yet.</p>
+  {% else %}
+    <div class="table-wrap">
+      {# row-cards: on a phone, description … amount, then date · category (app.css) #}
+      <table class="data compact row-cards">
+        <thead><tr><th>Date</th><th>Description</th><th>Category</th><th class="num">Amount</th></tr></thead>
+        <tbody>
+        {% for t in recent %}
+          <tr>
+            <td class="nowrap rc-sub">{{ t.date | date_label }}</td>
+            <td class="rc-main">{{ t.merchant_name or t.name }}</td>
+            <td class="muted rc-sub">{{ t.category_label }}{% if t.kind == 'transfer' %} <span class="small">(not counted)</span>{% endif %}</td>
+            {# Plaid sign: positive = money out. Money in is shown with a "+". #}
+            <td class="num rc-amt {{ 'kind-income' if t.amount_cents < 0 else '' }}">{% if t.amount_cents < 0 %}+{{ (-t.amount_cents) | money }}{% else %}{{ t.amount_cents | money }}{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</section>
+
+</div>
+<div class="overview-col">
+{% include "_accounts_card.html" %}
+{% include "_overview_calendar.html" %}
+
+
+
+{# ---- Cash flow: low-balance check + every confirmed recurring item in the next 30 days ---- #}
+<section class="card">
+  <div class="card-head">
+    <h2><a href="/cash-flow">Cash flow</a></h2>
+  </div>
+  {% if not flow.accounts %}
+    <p class="muted">No checking or savings balances to project yet.</p>
+  {% elif flow.warnings %}
+    {% for a in flow.warnings[:4] %}
+      <p class="status status-over">✕ {{ a.name }} below {{ flow.threshold_cents | money }} on {{ a.first_below | date_label }}</p>
+    {% endfor %}
+  {% else %}
+    <p><span class="status status-ok">✓ No low balances projected</span></p>
+  {% endif %}
+
+  {% if balance_chart.accounts %}
+    {# No "Show data" here: the "Coming up" list below already shows these events (user's choice). #}
+    {{ projected_balance("ov-balance", balance_chart) }}
+  {% endif %}
+
+  {# no explanatory text on this card (user's request 2026-11-02) #}
+  {% with no_notes = true %}{% include "_coming_up.html" %}{% endwith %}
+</section>
+
+</div>
+</div>
+{% endif %}
+{% endblock %}

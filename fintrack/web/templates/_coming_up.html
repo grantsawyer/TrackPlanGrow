@@ -1,0 +1,49 @@
+{# "Coming up in the next 30 days": confirmed recurring items and card statements still owed, overdue first
+   (forecast.upcoming_30), + the count of recurring items to review. Shared by the Overview's Cash flow card and
+   the Cash flow page (user's request 2026-10-14). Needs `upcoming`, `review_count`. `coming_up_card`: the Cash flow
+   page's own card, with a card heading and no Account column (one account; user's requests 2026-10-24); else a
+   sub-heading inside the Overview's card. `coming_up_days`: the period it covers (the Cash flow page's range; default
+   30). The Cash flow page's past card reuses it (2026-10-24) with `list_title`, `empty_text` and `past_list` (no review
+   note). Rows with `balance_after` get a Balance after column. `no_notes`: without the explanatory text (the Overview). #}
+{% from "_icons.html" import category_icon %}
+{% set span = coming_up_days | default(30) %}
+{% set title = list_title | default("Coming up in the next " ~ span ~ " days") %}
+{% set with_account = not coming_up_card %}
+{% if coming_up_card %}<div class="card-head"><h2>{{ title }}</h2></div>
+{% else %}<h3>{{ title }}</h3>{% endif %}
+{% if upcoming %}
+  {% set money_in = upcoming | selectattr('type', 'equalto', 'income') | map(attribute='amount_cents') | map('abs') | sum %}
+  {% set money_out = upcoming | rejectattr('type', 'equalto', 'income') | map(attribute='amount_cents') | map('abs') | sum %}
+  <p class="muted small">{{ upcoming | length }} item{{ '' if upcoming | length == 1 else 's' }}:
+    <span class="kind-income">+<span class="w-long">{{ money_in | money }}</span><span class="w-short">{{ money_in | money_whole }}</span></span> in, <span class="w-long">{{ money_out | money }}</span><span class="w-short">{{ money_out | money_whole }}</span> out</p>
+  <div class="table-wrap">
+    {# row-cards (the Overview's card): on a phone, what … amount, then date · account (app.css). The Cash flow page's
+       lists stay one line a row there, in whole dollars (user's request 2026-11-06). #}
+    <table class="data compact{{ ' row-cards' if not coming_up_card else ' cf-list' }}">
+      {# one account's list (the Cash flow page) carries the balance after each row (2026-10-24) #}
+      {% set with_balance = upcoming | selectattr('balance_after', 'defined') | list | length > 0 %}
+      {#- The Cash flow page's lists on a phone (user's request 2026-11-06; app.css .cf-list): a heading per month, the day
+          alone in the date column, the category's icon before the name, "Ending Balance" -#}
+      <thead><tr><th>Date</th>{% if coming_up_card %}<th class="c-icon"><span class="visually-hidden">Category</span></th>{% endif %}<th>{{ 'Transaction' if coming_up_card else 'What' }}</th>{% if with_account %}<th>Account</th>{% endif %}<th class="num">Amount</th>{% if with_balance %}<th class="num"><span class="w-long">Balance after</span><span class="w-short">Ending Balance</span></th>{% endif %}</tr></thead>
+      <tbody>
+      {% for u in upcoming %}
+        {%- if coming_up_card and (loop.first or u.date[:7] != loop.previtem.date[:7]) %}
+        <tr class="month-head"><th colspan="{{ 4 + (1 if with_balance else 0) }}" scope="rowgroup">{{ u.date[:7] | month_label }}</th></tr>{% endif %}
+        <tr>
+          <td class="nowrap rc-sub">{% if u.overdue %}<span class="status status-near">⚠ overdue</span>{% elif coming_up_card %}<span class="w-long">{{ u.date | date_label }}</span><span class="w-short">{{ u.date[8:10] | int }}</span>{% else %}{{ u.date | date_label }}{% endif %}</td>
+          {% if coming_up_card %}<td class="c-icon"><span class="merchant-logo category-icon">{{ category_icon(category_icon_of.get(u.category) if category_icon_of is defined and u.category is defined else none, 14) }}</span></td>{% endif %}
+          <td class="what rc-main" title="{{ u.name }}">{{ u.name }}{% if u.needs_payer and not with_account %} · <a href="/accounts/{{ u.card_id }}">choose a paying account</a>{% endif %}</td>
+          {% if with_account %}<td class="muted rc-sub">{% if u.needs_payer %}<a href="/accounts/{{ u.card_id }}">choose a paying account</a>{% else %}{{ u.account_name or '—' }}{% endif %}</td>{% endif %}
+          {# Stored with Plaid's sign (income negative); show money in as "+$X". #}
+          <td class="num rc-amt {{ 'kind-income' if u.type == 'income' else '' }}">{% if u.type == 'income' %}+{% endif %}<span class="w-long">{{ u.amount_cents | abs | money }}</span><span class="w-short">{{ u.amount_cents | abs | money_whole }}</span></td>
+          {% if with_balance %}<td class="num">{% if u.balance_after is defined %}<span class="w-long">{{ u.balance_after | money }}</span><span class="w-short">{{ u.balance_after | money_whole }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="muted small">{{ empty_text | default("Nothing confirmed is due in the next " ~ span ~ " days.") }}{% if not past_list and not no_notes %} <a href="/recurring">Recurring</a> lists what's tracked.{% endif %}</p>
+{% endif %}
+{% if review_count and not past_list %}<p class="small"><a href="/recurring">{{ review_count }} recurring item{{ '' if review_count == 1 else 's' }} to review</a>
+  {% if not no_notes %}<span class="muted">(only confirmed recurring items are forecast)</span>{% endif %}</p>{% endif %}

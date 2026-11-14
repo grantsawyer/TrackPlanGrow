@@ -1,0 +1,28 @@
+{# Live preview of the rule being built (rules.preview). #}
+{% if not preview.matches %}
+  <p class="muted small">No transactions match yet.</p>
+{% else %}
+  <p class="small">
+    <strong>{{ preview.matches }}</strong> transaction{{ '' if preview.matches == 1 else 's' }} match
+    {%- if preview.changes %} · <strong>{{ preview.changes }}</strong> would change{% endif %}
+    {%- if preview.yours %} · {{ preview.yours }} keep your own category{% endif %}
+    {%- if preview.earlier %} · {{ preview.earlier }} keep an earlier rule's{% endif %}
+  </p>
+  <div class="table-wrap">
+  <table class="data compact">
+    <thead><tr><th>Date</th><th>Description</th><th class="num">Amount</th><th>Now</th><th>With this rule</th></tr></thead>
+    <tbody>
+    {% for s in preview.samples %}
+      <tr>
+        <td class="nowrap">{{ s.row.date | date_label }}</td>
+        <td>{{ s.row.description }}</td>
+        <td class="num {{ 'ok' if s.row.amount_cents < 0 }}">{% if s.row.amount_cents < 0 %}+{{ (-s.row.amount_cents) | money }}{% else %}{{ s.row.amount_cents | money }}{% endif %}</td>
+        <td class="muted">{{ s.row.category_label }}</td>
+        <td>{{ s.outcome }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% if preview.matches > preview.samples | length %}<p class="muted small">Showing the newest {{ preview.samples | length }}.</p>{% endif %}
+{% endif %}

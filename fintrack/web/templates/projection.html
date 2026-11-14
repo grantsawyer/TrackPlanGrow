@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}Projection · Track Plan Grow{% endblock %}
+{% block head_scripts %}
+<script src="{{ url_for('static', path='projection.js') }}" defer></script>
+{% endblock %}
+{# In the ribbon, top right (user's request 2026-10-06): pick a scenario to compare, or make one. #}
+{% block tabbar_controls %}
+<form method="get" action="/projection" class="tabbar-controls">
+  <label><span class="range-word">Compare with</span>
+    <select name="scenario" data-autosubmit>
+      <option value="">— baseline only —</option>
+      {% for s in scenarios %}<option value="{{ s.id }}" {% if scenario_row and scenario_row.id == s.id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
+    </select>
+  </label>
+  <a class="button secondary" href="/projection/scenarios/new">New scenario</a>
+</form>
+{% endblock %}
+{% block content %}
+{% set sid = scenario_row.id if scenario_row else '' %}
+{% if msg %}<p class="flash ok" role="status">{{ msg }}</p>{% endif %}
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+
+{# ---------------- Headline numbers ---------------- #}
+<section class="kpis">
+  <div class="tile">
+    <div class="kpi-label">Today</div>
+    <div class="tile-value">{{ baseline.points[0].net_cents | money_whole }}</div>
+  </div>
+  {% for y in years %}
+    <div class="tile">
+      <div class="kpi-label">In {{ y }} year{{ '' if y == 1 else 's' }} ({{ baseline.at_years(y).month | month_label('short') }})</div>
+      <div class="tile-value">{{ baseline.at_years(y).net_cents | money_whole }}</div>
+      {% if scenario %}
+        {% set diff = scenario.at_years(y).net_cents - baseline.at_years(y).net_cents %}
+        <div class="kpi-sub">{{ scenario_row.name }}: {{ scenario.at_years(y).net_cents | money }}
+          <span class="{{ 'delta-up' if diff >= 0 else 'delta-down' }}">({{ '+' if diff >= 0 else '' }}{{ diff | money }})</span></div>
+      {% endif %}
+    </div>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <h2>Actual and projected</h2>
+  <p class="muted small">Actual monthly history up to {{ chart.today | month_label }}, then projected monthly for 10 years. Projections are estimates
+    from the assumptions below, not predictions.</p>
+  <div class="chart-box tall">
+    <canvas id="projection-chart" role="img" aria-label="Line chart of actual and projected net worth"></canvas>
+  </div>
+  <script type="application/json" id="projection-data">{{ chart | tojson }}</script>
+</section>
+
+{# ---------------- Side-by-side comparison ---------------- #}
+{% if scenario %}
+<section class="card">
+  <div class="card-head">
+    <h2>Baseline vs {{ scenario_row.name }}</h2>
+    <div class="actions">
+      <a class="small" href="/projection/scenarios/{{ scenario_row.id }}/edit">Edit scenario</a>
+      <form method="post" action="/projection/scenarios/{{ scenario_row.id }}/delete"><button type="submit" class="link-button small">Delete</button></form>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="data">
+      <thead><tr><th></th><th class="num">Baseline</th><th class="num">{{ scenario_row.name }}</th><th class="num">Difference</th></tr></thead>
+      <tbody>
+        <tr><td>Monthly savings</td><td class="num">{{ baseline.inputs.monthly_savings_cents | money }}</td>
+          <td class="num">{{ scenario.inputs.monthly_savings_cents | money }}</td>
+          <td class="num">{{ (scenario.inputs.monthly_savings_cents - baseline.inputs.monthly_savings_cents) | money }}</td></tr>
+        <tr><td>Investment return</td><td class="num">{{ baseline.inputs.investment_return_pct }}%</td>
+          <td class="num">{{ scenario.inputs.investment_return_pct }}%</td><td></td></tr>
+        {% for y in years %}
+          {% set b, s = baseline.at_years(y).net_cents, scenario.at_years(y).net_cents %}
+          <tr><td>Net worth in {{ y }} year{{ '' if y == 1 else 's' }}</td><td class="num">{{ b | money }}</td><td class="num">{{ s | money }}</td>
+            <td class="num {{ 'delta-up' if s >= b else 'delta-down' }}">{{ '+' if s >= b else '' }}{{ (s - b) | money }}</td></tr>
+        {% endfor %}
+        {% for o in baseline.loans if o.amortizes %}
+          {% set so = scenario_loans.get(o.account_id) %}
+          <tr><td>{{ o.name }} paid off</td><td class="num">{{ o.paid_off_month or 'after 10 years' }}</td>
+            <td class="num">{{ so.paid_off_month or 'after 10 years' }}</td><td></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if scenario.inputs.notes %}<ul class="muted small">{% for n in scenario.inputs.notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+  <p class="muted small">Scenarios only change projection inputs. Your real data isn't touched.</p>
+</section>
+{% endif %}
+
+{# ---------------- Assumptions ---------------- #}
+<section class="card">
+  <h2>Assumptions</h2>
+  <form method="post" action="/projection/settings" class="stacked-form wide">
+    <input type="hidden" name="scenario" value="{{ sid }}">
+    <label>Monthly savings
+      <input name="monthly_savings" inputmode="decimal" placeholder="{{ '{:,.2f}'.format(base.average_saved_cents / 100) }}"
+        value="{{ '%.2f' | format(base.monthly_savings_cents / 100) if base.savings_is_override else '' }}">
+      <span class="muted small">Blank = your average over the last {{ base.months_averaged }} complete month{{ '' if base.months_averaged == 1 else 's' }}:
+        {{ base.average_saved_cents | money }}/month saved (income {{ base.average_income_cents | money }} − spending). Assumed to be invested.</span>
+    </label>
+    <div class="inline-form">
+      <label>Investment return <input name="investment_return" size="5" value="{{ base.investment_return_pct }}">% per year</label>
+      <label>Property growth <input name="property_growth" size="5" value="{{ base.property_growth_pct }}">% per year</label>
+    </div>
+    <label class="choice"><input type="checkbox" name="redirect_paid_off" {% if base.redirect_paid_off %}checked{% endif %}>
+      When a loan is paid off, add its monthly payment to savings</label>
+    <p class="muted small">Cash, other assets, credit cards (assumed paid in full each month), and loans without a rate and payment are held
+      constant. The 5% return default is a placeholder, not a forecast. Set your own.</p>
+    <div class="actions"><button type="submit" class="secondary">Save assumptions</button></div>
+  </form>
+</section>
+
+{# ---------------- Loans ---------------- #}
+{% if baseline.loans %}
+<section class="card">
+  <h2>Loans and cards</h2>
+  <p class="muted small">Payoff needs an interest rate and a monthly payment. Plaid provides them for mortgages, student loans, and cards;
+    enter them yourself for others (auto loans, HELOCs, manual loans). Your entries are kept across syncs.</p>
+  <div class="table-wrap">
+    {# row-cards: on a phone, account … balance, then when it's paid off, then its rate and payment (app.css) #}
+    <table class="data row-cards">
+      <thead><tr><th>Account</th><th class="num">Balance</th><th>Rate · payment</th><th>Paid off (baseline)</th></tr></thead>
+      <tbody>
+      {% for o in baseline.loans %}
+        {% set t = terms.get(o.account_id) %}
+        <tr>
+          <td class="rc-main">{{ o.name }}{% if t and t.detail %}<div class="muted small">{{ t.detail }}</div>{% endif %}</td>
+          <td class="num rc-amt">{{ o.start_cents | money }}</td>
+          <td class="rc-act">
+            <form method="post" action="/projection/terms/{{ o.account_id }}" class="inline-form">
+              <input type="hidden" name="scenario" value="{{ sid }}">
+              <input name="apr" size="5" value="{{ o.apr_pct if o.apr_pct is not none else '' }}" placeholder="rate" aria-label="Interest rate">%
+              <input name="payment" size="8" inputmode="decimal" value="{{ '%.2f' | format(o.payment_cents / 100) if o.payment_cents is not none else '' }}"
+                placeholder="payment" aria-label="Monthly payment">/mo
+              <button type="submit" class="secondary small">Save</button>
+              {% if t and t.source %}<span class="tag">{{ 'Plaid' if t.source == 'plaid' else 'you' }}</span>{% endif %}
+            </form>
+          </td>
+          <td class="rc-sub" data-label="paid off">
+            {% if not o.amortizes %}<span class="muted small">held constant: {{ o.why_constant }}</span>
+            {% elif o.payment_too_low %}<span class="status status-over">✕ payment doesn't cover interest; balance grows</span>
+            {% else %}{{ o.paid_off_month or 'after 10 years' }}{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{# ---------------- Scenarios list ---------------- #}
+<section class="card">
+  <div class="card-head">
+    <h2>What-if scenarios</h2>
+    <a class="small" href="/projection/scenarios/new">New scenario</a>
+  </div>
+  {% if scenarios %}
+    <ul class="scenario-list">
+      {% for s in scenarios %}<li><a href="/projection?scenario={{ s.id }}">{{ s.name }}</a> <span class="muted small">· edited {{ s.updated_at | localtime }}</span></li>{% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">Try cutting a category, adding a new expense, changing your savings rate, or paying extra on a loan.</p>
+  {% endif %}
+</section>
+{% endblock %}

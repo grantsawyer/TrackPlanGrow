@@ -1,0 +1,163 @@
+{# Shared by Balances and Net worth (user's request 2026-10-13: the kind-of-account cards and the Change in value table
+   moved from Balances to Net worth; the Net worth card stayed on Balances). Data: web/balances.balances_context.
+   Import: {% from "_balances.html" import show_toggle, signed, pct, change_card, kind_cards, change_table %} #}
+{% from "_charts.html" import chart as viz %}
+{% from "_icons.html" import icon %}
+
+{# The ribbon's $ / % toggle (Balances 2026-10-12, Net worth 2026-10-13; user's requests): % = each period's % change,
+   $ = the total value. Links keep the date range (web/balances.balances_context `show_links`). #}
+{# The Net worth page's Compact / Detailed switch (user's request 2026-10-13): the cards as they are, or twice as wide
+   with recent activity beside them. #}
+{% macro layout_toggle(layout, layout_links) %}
+{# icons instead of words (user's request 2026-10-13); aria-label names each for screen readers, title on hover #}
+<nav class="seg seg-icons" aria-label="Card layout">
+  <a href="{{ layout_links.compact }}" aria-label="Compact" title="Compact"{% if layout == 'compact' %} aria-current="page"{% endif %}>{{ icon("layout-compact") }}</a>
+  <a href="{{ layout_links.detailed }}" aria-label="Detailed" title="Detailed: with recent activity"{% if layout == 'detailed' %} aria-current="page"{% endif %}>{{ icon("layout-detailed") }}</a>
+</nav>
+{% endmacro %}
+
+{% macro show_toggle(show, show_links) %}
+<nav class="seg" aria-label="Show the charts as">
+  <a href="{{ show_links.value }}" title="Total value"{% if show == 'value' %} aria-current="page"{% endif %}>$</a>
+  <a href="{{ show_links.pct }}" title="% change"{% if show == 'pct' %} aria-current="page"{% endif %}>%</a>
+</nav>
+{% endmacro %}
+
+{% macro signed(cents) -%}
+<span class="{{ 'delta-down' if cents < 0 else '' }}">{{ '+' if cents > 0 }}{{ cents | money_whole }}</span>
+{%- endmacro %}
+
+{# a change as a share of the starting value; "—" when it started at $0 #}
+{% macro pct(value) -%}
+{%- if value is none %}<span class="muted" title="Started at $0: nothing to compare with">—</span>
+{%- else %}{% set p = (value * 100) | round(1) + 0 %}{{ '+' if p > 0 }}{{ '%.1f' | format(p) }}%{% endif -%}
+{%- endmacro %}
+
+{# the cards' % change measure, stock style (user's request 2026-10-12): green ▲ up, red ▼ down, like Investments.
+   `invert` (credit cards: the % of the amount owed): the opposite colours, red ▲ = owing more, green ▼ = paid down. #}
+{% macro arrow_pct(value, invert=false) -%}
+{%- if value is none %}<span class="muted" title="Started at $0: nothing to compare with">—</span>
+{%- else %}<span class="{{ 'delta-up' if (value >= 0) != invert else 'delta-down' }}">{{ '▲' if value >= 0 else '▼' }} {{ '%.1f' | format((value * 100) | abs) }}%</span>{% endif -%}
+{%- endmacro %}
+
+{# One card. Measures (user's request 2026-10-12): Total value = the value at the end of the range; % change = the
+   change over the range ÷ the value just before it. Bars: % mode = stacked bars of each period's change; $ mode =
+   stacked areas of the total value. #}
+{% macro change_card(id, title, chart, what, show) %}
+<section class="card">{{ card_body(id, title, chart, what, show) }}</section>
+{% endmacro %}
+
+{# A Detailed card (Net worth page's Compact / Detailed switch, user's request 2026-10-13): twice as wide; the left
+   half is the card exactly as above, the right half the newest activity in the range on that kind's accounts
+   (balances.recent_activity; the Transactions page's sign: "+" green = money in). #}
+{% macro detailed_card(id, title, chart, what, show, activity, key) %}
+{# each row's source (account name) is written in its segment's colour in the chart (user's requests 2026-10-13: a dot
+   first, then coloured text): the kind's hue (hue-<key>), shaded by the segment's place in the legend like charts.js
+   shade() (shade-0..3, app.css) #}
+{% set labels = chart.series | map(attribute="label") | list %}
+<section class="card card-detailed">
+  <div class="detailed-half">{{ card_body(id, title, chart, what, show) }}</div>
+  <div class="detailed-half">
+    <h3 class="detailed-title">Recent activity</h3>
+    {% if activity %}
+    <table class="data compact activity-list">
+      <tbody>
+      {% for a in activity %}
+        <tr>
+          <td class="muted nowrap">{{ a.date | date_label }}</td>
+          {% set i = labels.index(a.segment) if a.segment in labels else none %}
+          <td class="clip"><div title="{{ a.description }}">{{ a.description }}</div><div class="muted small" title="{{ a.detail }}">
+            {%- if i is not none %}<span class="seg-text hue-{{ key }} shade-{{ [i, 3] | min }}">{{ a.source }}</span>{% else %}{{ a.source }}{% endif %} · {{ a.info }}</div></td>
+          {% if a.amount_cents is none %}
+          <td class="num muted" title="Balance on that date">{{ a.value_cents | money if a.value_cents is not none else "—" }}</td>
+          {% else %}
+          <td class="num {{ 'ok' if a.amount_cents < 0 else '' }}">
+            {%- if a.amount_cents < 0 %}+{{ (-a.amount_cents) | money }}{% else %}{{ a.amount_cents | money }}{% endif %}</td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted small">No activity in this range.</p>
+    {% endif %}
+  </div>
+</section>
+{% endmacro %}
+
+{# .kind-body: on the Net worth page a column at least as tall as a 7-row activity list, its chart filling the rest
+   (app.css --kind-card-h; user's request 2026-10-13), in both Compact and Detailed. #}
+{% macro card_body(id, title, chart, what, show) %}
+<div class="kind-body">
+  <div class="card-head"><h2>{{ title }}</h2></div>
+  <div class="measure-row">
+    <div class="measure">
+      {# red when an asset is below zero; never on credit cards, where owing is normal (user's request 2026-10-12) #}
+      <span class="measure-value {{ 'delta-down' if chart.value_cents < 0 and not chart.invert else '' }}">{{ chart.value_cents | money_whole }}</span>
+      <span class="kpi-label">Total value</span>
+    </div>
+    <div class="measure">
+      <span class="measure-value">{{ arrow_pct(chart.pct / 100 if chart.pct is not none else none, chart.invert) }}</span>
+      <span class="kpi-label">% change</span>
+    </div>
+  </div>
+  {{ viz(id, "stackedarea" if show == 'value' else "sharebars", chart, size="short", label=what) }}
+</div>
+{% endmacro %}
+
+{# The cards in one grid (.savings-cards, laid out by count): `networth_chart` (Balances: the Net worth card, its parts
+   = the kinds of account) and/or `cards` (Net worth page: one per kind that held anything in the range, Cash always).
+   `fit4` (Net worth page, user's request 2026-10-13): four per row on wide screens (app.css). #}
+{% macro kind_cards(cards, show, networth_chart=none, fit4=false, activity=none) %}
+{% set descriptions = {
+  "retirement": "retirement accounts, stacked by account type",
+  "investment": "other investment accounts, stacked by institution",
+  "purposes": "purpose accounts such as money lent, stacked by account",
+  "cash": "checking and savings, stacked by account",
+  "credit_cards": "credit card balances (the % follows the amount owed), stacked by card",
+} %}
+{% set by = "Total value at the end of each period" if show == 'value' else "% change each period" %}
+<div class="savings-cards">
+{# `activity` ({kind: rows}, the Detailed switch): double-width cards in their own grid (.cards.detailed) #}
+{#- data-mini-charts: on a phone the Compact cards sit two a row with small charts (charts.js mini, app.css) -#}
+<div class="cards {{ 'detailed' if activity is not none else 'n' ~ (cards | length + (1 if networth_chart else 0)) }}{{ ' fit4' if fit4 and activity is none }}"{{ ' data-mini-charts' if fit4 and activity is none }}>
+{% if networth_chart %}{{ change_card("bal-networth", "Net worth", networth_chart, by ~ " of net worth, stacked by kind of account", show) }}{% endif %}
+{% for key, label, chart in cards %}
+{% if activity is not none %}{{ detailed_card("bal-" ~ key, label, chart, by ~ ": " ~ descriptions[key], show, activity[key], key) }}
+{% else %}{{ change_card("bal-" ~ key, label, chart, by ~ ": " ~ descriptions[key], show) }}{% endif %}
+{% endfor %}
+</div>
+</div>
+{% endmacro %}
+
+{# Change in value per month: one column per kind of account shown, then net worth's change, % and value at the end. #}
+{% macro change_table(table, groups) %}
+<section class="card">
+  <h2>Change in value</h2>
+  <div class="table-wrap">
+    {# row-cards: on a phone, month … net worth change, then each kind's change, the % and net worth (app.css) #}
+    <table class="data row-cards rc-cols" id="balances-table">
+      <thead><tr><th>Month</th>
+        {% for key, label in groups %}<th class="num">{{ label }}</th>{% endfor %}
+        <th class="num" title="Change in net worth: the sum of the columns before it">Net worth change</th>
+        <th class="num" title="Net worth change ÷ net worth just before the month">%</th>
+        <th class="num" title="Net worth at the end of the month (today for the month in progress)">Net worth</th></tr></thead>
+      <tbody>
+      {% for m in table | reverse %}
+        <tr>
+          <td class="rc-main">{% set d = m.clipped_days %}{% if d %}{{ (m.month | month_label('short'))[:3] }} {{ d[0] }}–{{ d[1] }}, {{ m.month[:4] }}
+            {%- else %}{{ m.month | month_label('short') }}{% endif %}
+            {%- if m.partial %} <span class="muted small">(so far)</span>{% endif %}</td>
+          {% for key, label in groups %}<td class="num rc-sub" data-label="{{ label | lower }}">{{ signed(m.change(key)) }}</td>{% endfor %}
+          <td class="num rc-amt">{{ signed(m.change()) }}</td>
+          <td class="num muted rc-sub" data-label="change">{{ pct(m.pct()) }}</td>
+          <td class="num rc-sub" data-label="net worth">{{ m.value_after() | money_whole }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="{{ groups | length + 4 }}" class="muted">No balances in this range.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endmacro %}
